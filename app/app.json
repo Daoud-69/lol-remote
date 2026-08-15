@@ -1,0 +1,42 @@
+{
+  "expo": {
+    "name": "LoL Remote",
+    "slug": "lol-remote",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "scheme": "lolremote",
+    "backgroundColor": "#0a1428",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.lolremote.app",
+      "infoPlist": {
+        "NSLocalNetworkUsageDescription": "LoL Remote connects to the agent running on your PC over your local network.",
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        },
+        "UIBackgroundModes": ["remote-notification"]
+      }
+    },
+    "android": {
+      "package": "com.lolremote.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#0a1428",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": ["INTERNET", "VIBRATE", "ACCESS_NETWORK_STATE"],
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": ["expo-notifications"],
+    "extra": {
+      "eas": {
+        "projectId": ""
+      }
+    }
+  }
+}
