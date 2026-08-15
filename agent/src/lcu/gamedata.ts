@@ -19,18 +19,21 @@ export class GameData {
         { id: number; name: string; alias: string }[]
       >("/lol-game-data/assets/v1/champion-summary.json"),
       this.lcu.get<
-        { id: number; name: string; description: string; gameModes?: string[] }[]
+        { id: number; name: string; description: string; iconPath: string; gameModes?: string[] }[]
       >("/lol-game-data/assets/v1/summoner-spells.json"),
     ]);
 
     this.champions = champions
-      .filter((c) => c.id > 0) // id -1 is the "None" placeholder
+      // id -1 is the "None" placeholder; "Jade_"-aliased entries are a duplicate,
+      // non-playable catalog row per champion (id offset by +60000) — real
+      // pick/ban calls never recognize them, so picking one silently no-ops.
+      .filter((c) => c.id > 0 && !c.alias.startsWith("Jade_"))
       .map((c) => ({ id: c.id, name: c.name, alias: c.alias }))
       .sort((a, b) => a.name.localeCompare(b.name));
 
     this.spells = spells
       .filter((s) => s.id > 0 && SELECTABLE_SPELL_IDS.has(s.id))
-      .map((s) => ({ id: s.id, name: s.name, description: stripTags(s.description) }))
+      .map((s) => ({ id: s.id, name: s.name, description: stripTags(s.description), iconPath: s.iconPath }))
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
@@ -109,6 +112,8 @@ interface RawSkin {
   ownership?: { owned: boolean };
   unlocked?: boolean;
   isBase?: boolean;
+  /** Real asset path — the predictable `/champion-splashes/{champ}/{skin}.jpg` guess 400s on current clients. */
+  splashPath: string;
   chromas?: { id: number; name: string; colors: string[]; ownership?: { owned: boolean } }[];
 }
 
@@ -119,6 +124,7 @@ function toSkin(raw: RawSkin): Skin {
     championId: raw.championId ?? Math.floor(raw.id / 1000),
     unlocked: raw.unlocked ?? raw.ownership?.owned ?? false,
     isBase: raw.isBase ?? raw.id % 1000 === 0,
+    splashPath: raw.splashPath,
     chromas: (raw.chromas ?? []).map((c) => ({
       id: c.id,
       name: c.name,
