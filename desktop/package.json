@@ -1,0 +1,45 @@
+{
+  "name": "lol-remote-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "LoL Remote Agent",
+  "author": "LoL Remote",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "package:installer": "electron-vite build && electron-builder --win"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "framer-motion": "^13.1.0",
+    "lucide-react": "^1.31.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "selfsigned": "^5.5.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@electron-toolkit/preload": "^3.0.2",
+    "@electron-toolkit/utils": "^4.0.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@types/ws": "^8.5.13",
+    "@vitejs/plugin-react": "^5.2.0",
+    "electron": "^43.4.0",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.7.2",
+    "vite": "^7.0.0"
+  },
+  "allowScripts": {
+    "electron-winstaller@5.4.0": true,
+    "esbuild@0.25.12": true,
+    "esbuild@0.28.2": true
+  }
+}

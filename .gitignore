@@ -5,6 +5,10 @@ node_modules/
 agent/dist/
 agent/build/
 
+# Desktop (Electron) build output
+desktop/out/
+desktop/build/
+
 # Expo / Metro
 .expo/
 dist/

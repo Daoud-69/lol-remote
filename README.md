@@ -61,6 +61,43 @@ prompt:
 New-NetFirewallRule -DisplayName "LoL Remote" -Direction Inbound -LocalPort 8777 -Protocol TCP -Action Allow -Profile Private
 ```
 
+**Prefer a normal Windows app?** There are two installer builds — same agent underneath, different
+shell around it.
+
+**[`desktop/`](desktop) — a real window (recommended).** Electron app with a proper UI: the pairing
+code and address front and center, live League-client status, a connected-phone indicator, and an
+activity feed — styled to match the [`web/`](web) remote control. Minimizes to the tray instead of
+quitting, so closing the window doesn't drop your phone's connection.
+
+```bash
+cd desktop
+npm install
+npm run package:installer
+```
+
+Produces `desktop/build/dist/LoLRemoteAgent-Setup.<version>.exe` (~100 MB — Electron bundles its own
+Chromium + Node). Installs with a Start Menu / desktop shortcut and an uninstaller, same as any
+Windows app. It runs the *same* agent server code as `agent/` — imported directly from
+[`agent/src`](agent/src), not duplicated — just started from Electron's main process instead of a
+CLI entry point, with the window replacing the console banner.
+
+**[`agent/`](agent) — a lightweight console exe.** No GUI, no Electron, just the agent bundled into
+a standalone `.exe` (no Node.js install required to run it) via Node's [Single Executable
+Application](https://nodejs.org/api/single-executable-applications.html) support, wrapped in an
+Inno Setup installer:
+
+```bash
+cd agent
+npm install
+npm run package:installer
+```
+
+Produces `agent/build/LoLRemoteAgent-Setup.exe` (~25 MB). Same Start Menu shortcut / firewall rule /
+uninstaller treatment as the Electron build, but opening it shows the pairing info in a console
+window instead — pick this one if you'd rather keep the footprint small. Both installers' compiler
+binaries ship inside npm packages (`electron-builder`, `innosetup-compiler`), so nothing extra needs
+installing on the build machine for either path.
+
 ### 2. App (on your phone)
 
 The project is already scaffolded on **Expo SDK 57** with dependencies resolved, so this is just:
@@ -121,6 +158,11 @@ app/
   src/useAgent.ts       Live WebSocket state with reconnect
   src/screens/          Connect, Status, ChampSelect, Automation
   src/components/       Champion grid, skin carousel, spell picker, UI primitives
+
+desktop/src/            Electron shell around agent/src — see "Prefer a normal Windows app?" above
+  main/index.ts          Starts the same Session + startServer as the CLI, plus tray/window/IPC
+  preload/index.ts        contextBridge API the renderer calls into
+  renderer/src/          Pairing code, status, and activity feed UI (styled to match web/)
 ```
 
 ## How the interesting parts work
@@ -172,6 +214,8 @@ everything except the LCU calls themselves:
   ignored, completed actions, ARAM bench, and malformed sessions
 - App bundles for iOS (812 modules) and web (347 modules), zero console errors
 - Full connect flow drives the live agent and streams its activity log in real time
+- The `desktop/` Electron build launched against a **live League client mid-match** and correctly
+  reported "Connected to the League client" in its status card and activity log
 
 **Not yet tested:** every call that needs a live League client — accept, pick, ban, spells, skins,
 bench swap. Those are the endpoints to watch on first real use.
@@ -182,4 +226,3 @@ bench swap. Those are the endpoints to watch on first real use.
 - Rune page selection — `/lol-perks/v1/pages`
 - Position-aware presets: auto-pick a different champion per assigned role
 - Cloud relay so it works off your home Wi-Fi (a small WebSocket server both sides dial out to)
-- Package the agent as a tray app with run-at-startup via `pkg` or `node-windows`

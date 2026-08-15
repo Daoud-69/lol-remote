@@ -19,7 +19,11 @@ import {
 } from "./lcu/actions.js";
 import type { ServerMessage } from "./types.js";
 
-export async function startServer(session: Session): Promise<void> {
+export interface ServerHandle {
+  getConnectedPhoneCount: () => number;
+}
+
+export async function startServer(session: Session): Promise<ServerHandle> {
   const app = express();
   app.use(express.json());
 
@@ -288,6 +292,8 @@ export async function startServer(session: Session): Promise<void> {
   server.listen(SERVER_PORT, "0.0.0.0", () => {
     console.log(`[agent] Listening on port ${SERVER_PORT}`);
   });
+
+  return { getConnectedPhoneCount: () => wss.clients.size };
 }
 
 // --- Helpers ---------------------------------------------------------------

@@ -1,0 +1,19 @@
+appId: com.lolremote.agent
+productName: LoL Remote Agent
+directories:
+  buildResources: build
+  output: build/dist
+files:
+  - out/**/*
+  - "!**/*.map"
+win:
+  target: nsis
+  icon: build/icon.ico
+  artifactName: LoLRemoteAgent-Setup.${version}.${ext}
+nsis:
+  oneClick: false
+  perMachine: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: LoL Remote Agent
