@@ -7,11 +7,11 @@ export interface Connection {
 }
 
 export function baseUrl(connection: Connection): string {
-  return `http://${connection.host}:${connection.port}`;
+  return `https://${connection.host}:${connection.port}`;
 }
 
 export function socketUrl(connection: Connection): string {
-  return `ws://${connection.host}:${connection.port}/ws?code=${encodeURIComponent(connection.code)}`;
+  return `wss://${connection.host}:${connection.port}/ws?code=${encodeURIComponent(connection.code)}`;
 }
 
 /** Asset URLs, proxied through the agent straight from the League client — no Data Dragon, never stale. */
@@ -88,7 +88,7 @@ function post<T>(connection: Connection, path: string, body?: unknown) {
 /** Confirms an agent is listening, before we save the connection. */
 export async function ping(host: string, port: number): Promise<boolean> {
   try {
-    const response = await fetchWithTimeout(`http://${host}:${port}/api/ping`, {}, 4000);
+    const response = await fetchWithTimeout(`https://${host}:${port}/api/ping`, {}, 4000);
     if (!response.ok) return false;
     const body = (await response.json()) as { service?: string };
     return body.service === "lol-remote-agent";

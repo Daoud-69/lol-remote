@@ -19,6 +19,8 @@ function banner(): void {
   }
   console.log("");
   console.log("  Enter those in the phone app, on the same Wi-Fi.");
+  console.log("  This runs over a self-signed HTTPS cert — the first time a");
+  console.log("  browser hits it, accept the security warning to continue.");
   console.log("  Keep this window open while you play.");
   console.log("");
 }
@@ -27,7 +29,7 @@ async function main(): Promise<void> {
   banner();
 
   const session = new Session();
-  startServer(session);
+  await startServer(session);
 
   process.on("unhandledRejection", (reason) => {
     console.error("[agent] Unhandled rejection:", reason);

@@ -1,7 +1,8 @@
-import http from "node:http";
+import https from "node:https";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { WebSocketServer, WebSocket } from "ws";
 import { Session } from "./session.js";
+import { getOrCreateCert } from "./certs.js";
 import { addPushToken, getPairingCode, SERVER_PORT } from "./config.js";
 import { sendPush } from "./push.js";
 import {
@@ -18,7 +19,7 @@ import {
 } from "./lcu/actions.js";
 import type { ServerMessage } from "./types.js";
 
-export function startServer(session: Session): void {
+export async function startServer(session: Session): Promise<void> {
   const app = express();
   app.use(express.json());
 
@@ -237,11 +238,14 @@ export function startServer(session: Session): void {
 
   // --- Transport -----------------------------------------------------------
 
-  const server = http.createServer(app);
+  // HTTPS so an HTTPS-hosted phone frontend (e.g. deployed on Vercel) can call
+  // this LAN address without the browser blocking it as mixed content. The
+  // cert is self-signed — the phone accepts the one-time browser warning.
+  const server = https.createServer(await getOrCreateCert(), app);
   const wss = new WebSocketServer({ noServer: true });
 
   server.on("upgrade", (request, socket, head) => {
-    const url = new URL(request.url ?? "/", "http://localhost");
+    const url = new URL(request.url ?? "/", "https://localhost");
     if (url.pathname !== "/ws") {
       socket.destroy();
       return;

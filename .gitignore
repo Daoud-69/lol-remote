@@ -3,6 +3,7 @@ node_modules/
 
 # Agent build output
 agent/dist/
+agent/build/
 
 # Expo / Metro
 .expo/
