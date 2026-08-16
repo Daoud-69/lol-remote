@@ -1,8 +1,9 @@
-import https from "node:https";
+import http from "node:http";
+import { existsSync } from "node:fs";
+import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { WebSocketServer, WebSocket } from "ws";
 import { Session } from "./session.js";
-import { getOrCreateCert } from "./certs.js";
 import { addPushToken, getPairingCode, SERVER_PORT } from "./config.js";
 import { sendPush } from "./push.js";
 import {
@@ -21,9 +22,23 @@ import type { ServerMessage } from "./types.js";
 
 export interface ServerHandle {
   getConnectedPhoneCount: () => number;
+  /** True when a web/dist build was found and is being served at "/". */
+  servingWebApp: boolean;
 }
 
-export async function startServer(session: Session): Promise<ServerHandle> {
+export interface StartServerOptions {
+  /**
+   * A built copy of web/dist, if present. Served at "/" on the same port as
+   * the API, so the one address the agent already prints doubles as the link
+   * to open in a phone's browser — no separate server to run or explain.
+   */
+  webDir?: string;
+}
+
+export async function startServer(
+  session: Session,
+  options: StartServerOptions = {},
+): Promise<ServerHandle> {
   const app = express();
   app.use(express.json());
 
@@ -38,6 +53,13 @@ export async function startServer(session: Session): Promise<ServerHandle> {
   app.options("*", (_req, res) => {
     res.sendStatus(204);
   });
+
+  const servingWebApp = Boolean(
+    options.webDir && existsSync(path.join(options.webDir, "index.html")),
+  );
+  if (servingWebApp) {
+    app.use(express.static(options.webDir!));
+  }
 
   /** Unauthenticated, so the app can confirm it found the agent before pairing. */
   app.get("/api/ping", (_req, res) => {
@@ -242,14 +264,15 @@ export async function startServer(session: Session): Promise<ServerHandle> {
 
   // --- Transport -----------------------------------------------------------
 
-  // HTTPS so an HTTPS-hosted phone frontend (e.g. deployed on Vercel) can call
-  // this LAN address without the browser blocking it as mixed content. The
-  // cert is self-signed — the phone accepts the one-time browser warning.
-  const server = https.createServer(await getOrCreateCert(), app);
+  // Plain HTTP: the pairing code is the actual access control (see README's
+  // Security section), and a self-signed HTTPS cert bought nothing but a
+  // scary browser warning and a phone/agent trust dance for a same-LAN
+  // connection — not worth the friction for the common case.
+  const server = http.createServer(app);
   const wss = new WebSocketServer({ noServer: true });
 
   server.on("upgrade", (request, socket, head) => {
-    const url = new URL(request.url ?? "/", "https://localhost");
+    const url = new URL(request.url ?? "/", "http://localhost");
     if (url.pathname !== "/ws") {
       socket.destroy();
       return;
@@ -293,7 +316,7 @@ export async function startServer(session: Session): Promise<ServerHandle> {
     console.log(`[agent] Listening on port ${SERVER_PORT}`);
   });
 
-  return { getConnectedPhoneCount: () => wss.clients.size };
+  return { getConnectedPhoneCount: () => wss.clients.size, servingWebApp };
 }
 
 // --- Helpers ---------------------------------------------------------------

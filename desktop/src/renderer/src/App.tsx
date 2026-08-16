@@ -11,6 +11,7 @@ export default function App() {
   const [port, setPort] = useState(8777);
   const [state, setState] = useState<AgentState | null>(null);
   const [connectedPhones, setConnectedPhones] = useState(0);
+  const [servingWebApp, setServingWebApp] = useState(false);
 
   useEffect(() => {
     void window.api.getInfo().then((info) => {
@@ -19,6 +20,7 @@ export default function App() {
       setPort(info.port);
       setState(info.state);
       setConnectedPhones(info.connectedPhones);
+      setServingWebApp(info.servingWebApp);
     });
 
     return window.api.onState((push) => {
@@ -48,6 +50,7 @@ export default function App() {
         pairingCode={pairingCode}
         addresses={addresses}
         port={port}
+        servingWebApp={servingWebApp}
         onRegenerate={async () => {
           const next = await window.api.regenerateCode();
           setPairingCode(next);

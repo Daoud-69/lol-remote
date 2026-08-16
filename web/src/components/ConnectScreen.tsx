@@ -5,9 +5,17 @@ import { ping, verify, type Connection } from "../lib/api";
 import { Button } from "./ui/Button";
 import leagueIcon from "../assets/league-icon.png";
 
+// Vite's own dev/preview servers (npm run dev / vite preview) — if the page
+// loaded from one of those, it's a standalone checkout, not the agent
+// serving its own build, so there's nothing sensible to prefill from the URL.
+const STANDALONE_DEV_PORTS = new Set(["5173", "4173"]);
+
 export function ConnectScreen({ onConnected }: { onConnected: (connection: Connection) => void }) {
-  const [host, setHost] = useState("");
-  const [port, setPort] = useState("8777");
+  const selfServed = !STANDALONE_DEV_PORTS.has(window.location.port);
+  // When the agent serves this page itself, the address bar already has the
+  // answer — no reason to make anyone type it.
+  const [host, setHost] = useState(selfServed ? window.location.hostname : "");
+  const [port, setPort] = useState(selfServed ? window.location.port || "8777" : "8777");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

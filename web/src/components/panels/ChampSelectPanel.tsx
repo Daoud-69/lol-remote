@@ -314,6 +314,11 @@ function BenchRow({
   );
 }
 
+/** The client calls the support role "utility" internally; show the name players actually use. */
+function positionLabel(position: string): string {
+  return position === "utility" ? "support" : position;
+}
+
 function TeamCard({ select, connection }: { select: NonNullable<AgentState["champSelect"]>; connection: Connection }) {
   const bans = [...select.bans.myTeamBans, ...select.bans.theirTeamBans].filter(Boolean);
 
@@ -334,7 +339,7 @@ function TeamCard({ select, connection }: { select: NonNullable<AgentState["cham
               ) : (
                 <div className={`aspect-square w-full rounded-lg bg-obsidian-raised border-2 border-dashed ${slot.isLocalPlayer ? "border-gold" : "border-hairline"}`} />
               )}
-              <span className="text-[9px] text-ink-dim truncate w-full text-center">{slot.assignedPosition || "—"}</span>
+              <span className="text-[9px] text-ink-dim truncate w-full text-center">{positionLabel(slot.assignedPosition) || "—"}</span>
             </div>
           );
         })}

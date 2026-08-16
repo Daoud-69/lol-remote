@@ -19,8 +19,6 @@ function banner(): void {
   }
   console.log("");
   console.log("  Enter those in the phone app, on the same Wi-Fi.");
-  console.log("  This runs over a self-signed HTTPS cert — the first time a");
-  console.log("  browser hits it, accept the security warning to continue.");
   console.log("  Keep this window open while you play.");
   console.log("");
 }

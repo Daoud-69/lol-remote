@@ -13,6 +13,12 @@ import type { AgentState } from "../../../agent/src/types.js";
 
 const iconPath = join(__dirname, "../../build/icon.ico");
 
+// Packaged builds get web/dist copied in as an extraResource (see
+// electron-builder.yml); running from source, it's just the sibling project.
+const webDir = app.isPackaged
+  ? join(process.resourcesPath, "web-dist")
+  : join(__dirname, "../../../web/dist");
+
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let serverHandle: ServerHandle | null = null;
@@ -27,7 +33,7 @@ if (!app.requestSingleInstanceLock()) {
     electronApp.setAppUserModelId("com.lolremote.agent");
 
     const session = new Session();
-    serverHandle = await startServer(session);
+    serverHandle = await startServer(session, { webDir });
     void session.start();
 
     session.on("state", () => pushState(session));
@@ -116,6 +122,7 @@ function registerIpc(session: Session): void {
     port: SERVER_PORT,
     state: session.getState(),
     connectedPhones: serverHandle?.getConnectedPhoneCount() ?? 0,
+    servingWebApp: serverHandle?.servingWebApp ?? false,
   }));
 
   ipcMain.handle("agent:regenerateCode", () => regeneratePairingCode());

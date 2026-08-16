@@ -309,7 +309,7 @@ function TeamCard({
                 />
               )}
               <Text numberOfLines={1} style={styles.teamPosition}>
-                {slot.assignedPosition || "—"}
+                {positionLabel(slot.assignedPosition) || "—"}
               </Text>
             </View>
           );
@@ -341,6 +341,11 @@ function phaseLabel(phase: string): string {
   if (phase === "BAN_PICK") return "Ban / pick phase";
   if (phase === "FINALIZATION") return "Finalizing";
   return "Champion select";
+}
+
+/** The client calls the support role "utility" internally; show the name players actually use. */
+function positionLabel(position: string): string {
+  return position === "utility" ? "support" : position;
 }
 
 const styles = StyleSheet.create({

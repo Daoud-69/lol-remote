@@ -34,40 +34,14 @@ there's nothing to configure.
 
 ### 1. Agent (on the gaming PC)
 
-Needs [Node.js 20+](https://nodejs.org) — tested on 24.19.0 LTS.
+**[`desktop/`](desktop) is the app to install** — a proper Windows program with its own window: the
+pairing code and address front and center, live League-client status, a connected-phone indicator,
+and an activity feed, styled to match the [`web/`](web) remote control. Minimizes to the tray
+instead of quitting, so closing the window doesn't drop your phone's connection.
 
-```bash
-cd agent
-npm install
-npm run dev          # or: npm run build && npm start
-```
-
-It prints something like:
-
-```
-  LoL Remote — agent
-  ─────────────────────────────────────────
-  Pairing code:  418302
-  Address:       192.168.1.20:8777
-```
-
-Leave that window open while you play. It waits for the League client and reconnects on its own if
-the client restarts.
-
-**Windows Firewall** will prompt on first run — allow it on *private* networks. If you missed the
-prompt:
-
-```powershell
-New-NetFirewallRule -DisplayName "LoL Remote" -Direction Inbound -LocalPort 8777 -Protocol TCP -Action Allow -Profile Private
-```
-
-**Prefer a normal Windows app?** There are two installer builds — same agent underneath, different
-shell around it.
-
-**[`desktop/`](desktop) — a real window (recommended).** Electron app with a proper UI: the pairing
-code and address front and center, live League-client status, a connected-phone indicator, and an
-activity feed — styled to match the [`web/`](web) remote control. Minimizes to the tray instead of
-quitting, so closing the window doesn't drop your phone's connection.
+It also serves the [`web/`](web) remote control itself, from the same address it already shows —
+open that link in your phone's browser and you get the actual app UI, no separate server to start,
+no app install needed. The address doubles as both the API endpoint and the web app's URL.
 
 ```bash
 cd desktop
@@ -75,28 +49,25 @@ npm install
 npm run package:installer
 ```
 
-Produces `desktop/build/dist/LoLRemoteAgent-Setup.<version>.exe` (~100 MB — Electron bundles its own
-Chromium + Node). Installs with a Start Menu / desktop shortcut and an uninstaller, same as any
-Windows app. It runs the *same* agent server code as `agent/` — imported directly from
-[`agent/src`](agent/src), not duplicated — just started from Electron's main process instead of a
-CLI entry point, with the window replacing the console banner.
+Produces `desktop/build/dist/LoLRemoteAgent-Setup.<version>.exe`. Running it installs like any other
+Windows app — Start Menu / desktop shortcut, an optional Windows Firewall rule (covers every network
+profile, so a Wi-Fi/Ethernet connection Windows happens to classify as "Public" won't silently block
+your phone), an optional "start with Windows" shortcut, and a proper uninstaller. `package:installer`
+builds `web/` first and bundles it in as a resource, so the phone-facing web app ships inside the
+installer with no extra step. The compiler binaries ship inside the `electron-builder` npm package,
+so nothing extra needs installing on the build machine.
 
-**[`agent/`](agent) — a lightweight console exe.** No GUI, no Electron, just the agent bundled into
-a standalone `.exe` (no Node.js install required to run it) via Node's [Single Executable
-Application](https://nodejs.org/api/single-executable-applications.html) support, wrapped in an
-Inno Setup installer:
+**Running from source, for development:**
 
 ```bash
 cd agent
 npm install
-npm run package:installer
+npm run dev
 ```
 
-Produces `agent/build/LoLRemoteAgent-Setup.exe` (~25 MB). Same Start Menu shortcut / firewall rule /
-uninstaller treatment as the Electron build, but opening it shows the pairing info in a console
-window instead — pick this one if you'd rather keep the footprint small. Both installers' compiler
-binaries ship inside npm packages (`electron-builder`, `innosetup-compiler`), so nothing extra needs
-installing on the build machine for either path.
+This prints the same pairing banner to the terminal and runs the identical server code the
+`desktop/` app imports — useful for iterating on `agent/src` without rebuilding the whole Electron
+app each time, but it's a developer workflow, not something to hand to a friend.
 
 ### 2. App (on your phone)
 
@@ -159,8 +130,8 @@ app/
   src/screens/          Connect, Status, ChampSelect, Automation
   src/components/       Champion grid, skin carousel, spell picker, UI primitives
 
-desktop/src/            Electron shell around agent/src — see "Prefer a normal Windows app?" above
-  main/index.ts          Starts the same Session + startServer as the CLI, plus tray/window/IPC
+desktop/src/            Electron shell around agent/src — the app to actually install, see above
+  main/index.ts          Starts the same Session + startServer as agent/'s dev entry, plus tray/window/IPC
   preload/index.ts        contextBridge API the renderer calls into
   renderer/src/          Pairing code, status, and activity feed UI (styled to match web/)
 ```

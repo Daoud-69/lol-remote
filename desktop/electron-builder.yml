@@ -6,6 +6,9 @@ directories:
 files:
   - out/**/*
   - "!**/*.map"
+extraResources:
+  - from: ../web/dist
+    to: web-dist
 win:
   target: nsis
   icon: build/icon.ico
@@ -17,3 +20,4 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: LoL Remote Agent
+  include: build/installer.nsh

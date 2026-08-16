@@ -9,25 +9,16 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit",
-    "icon": "node scripts/make-icon.mjs",
-    "package:exe": "node scripts/package-exe.mjs",
-    "package:installer": "node scripts/build-installer.mjs"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "express": "^4.21.2",
-    "selfsigned": "^5.5.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
     "@types/node": "^22.10.0",
     "@types/ws": "^8.5.13",
-    "esbuild": "^0.28.2",
-    "innosetup-compiler": "^6.3.1",
-    "png-to-ico": "^3.0.2",
-    "postject": "^1.0.0-alpha.6",
-    "rcedit": "^5.0.2",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   },

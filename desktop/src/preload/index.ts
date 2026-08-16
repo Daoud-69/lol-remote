@@ -8,6 +8,7 @@ export interface AgentInfo {
   port: number;
   state: AgentState;
   connectedPhones: number;
+  servingWebApp: boolean;
 }
 
 const api = {

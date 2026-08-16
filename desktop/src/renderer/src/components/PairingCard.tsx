@@ -6,11 +6,13 @@ export function PairingCard({
   pairingCode,
   addresses,
   port,
+  servingWebApp,
   onRegenerate,
 }: {
   pairingCode: string;
   addresses: string[];
   port: number;
+  servingWebApp: boolean;
   onRegenerate: () => Promise<void>;
 }) {
   const [confirmingReset, setConfirmingReset] = useState(false);
@@ -18,32 +20,42 @@ export function PairingCard({
 
   return (
     <Card className="relative overflow-hidden">
-      <SectionTitle accent="gold">Pairing code</SectionTitle>
+      <SectionTitle accent="hextech">
+        {servingWebApp ? "Open on your phone" : "Address"}
+      </SectionTitle>
 
-      <div className="flex items-center justify-between gap-3">
-        <span className="select-text font-display text-glow-gold text-gold text-[52px] leading-none font-bold tracking-[0.14em] tabular-nums">
-          {pairingCode}
-        </span>
-        <CopyButton value={pairingCode} />
-      </div>
+      {addresses.length === 0 ? (
+        <p className="text-danger text-xs">No network interface found.</p>
+      ) : (
+        <div className="space-y-2">
+          {addresses.map((address) => (
+            <div key={address} className="flex items-center justify-between gap-3">
+              <span className="select-text font-display text-ink text-sm tracking-wide tabular-nums">
+                http://{address}:{port}
+              </span>
+              <CopyButton value={`http://${address}:${port}`} small />
+            </div>
+          ))}
+        </div>
+      )}
 
       <p className="text-ink-dim text-xs mt-2 leading-relaxed">
-        Enter this in the phone app, on the same Wi-Fi.
+        {servingWebApp
+          ? "Open this link in your phone's browser, same Wi-Fi as this PC."
+          : "Web app not bundled with this build — enter this address in the LoL Remote app instead."}
       </p>
 
-      <div className="mt-4 pt-4 border-t border-hairline space-y-2">
-        {addresses.length === 0 ? (
-          <p className="text-danger text-xs">No network interface found.</p>
-        ) : (
-          addresses.map((address) => (
-            <div key={address} className="flex items-center justify-between gap-3">
-              <span className="select-text font-display text-ink-muted text-sm tracking-wide tabular-nums">
-                {address}:{port}
-              </span>
-              <CopyButton value={`${address}:${port}`} small />
-            </div>
-          ))
-        )}
+      <div className="mt-4 pt-4 border-t border-hairline">
+        <SectionTitle accent="gold">Pairing code</SectionTitle>
+        <div className="flex items-center justify-between gap-3">
+          <span className="select-text font-display text-glow-gold text-gold text-[52px] leading-none font-bold tracking-[0.14em] tabular-nums">
+            {pairingCode}
+          </span>
+          <CopyButton value={pairingCode} />
+        </div>
+        <p className="text-ink-dim text-xs mt-2 leading-relaxed">
+          Enter this once the page above asks for it.
+        </p>
       </div>
 
       <div className="mt-4 pt-4 border-t border-hairline flex items-center justify-between">
