@@ -1,21 +1,10 @@
 # LoL Remote
 
-Control League of Legends champion select from your phone: accept the ready check, pick or ban a
-champion, set summoner spells, and choose your skin — all while you're away from the PC.
+Control League of Legends champion select from your phone — accept the ready check, pick or ban a
+champion, and choose your skin, without touching the keyboard.
 
-**[⬇ Download the latest release](https://github.com/Daoud-69/lol-remote/releases/latest)** — just
-run the installer, no separate setup needed. (Cloning/downloading this repo as source only gets you
-the code, not a runnable app — see [Setup](#setup) below if that's what you're after.)
-
-```
-Phone (Expo app)  ──HTTP + WebSocket──▶  Agent (Node, on your PC)  ──▶  League Client API
-        ▲                                        │
-        └────────── Expo push ───────────────────┘   "Queue popped!"
-```
-
-The agent talks to the **LCU** (League Client Update) API — the same local HTTPS API the client's
-own UI uses. It reads the port and auth token from the running `LeagueClientUx.exe` process, so
-there's nothing to configure.
+**[⬇ Download](https://github.com/Daoud-69/lol-remote/releases/latest)**, run the installer on your
+gaming PC, then open the link it shows you on your phone. That's the whole setup.
 
 ## What it does
 
@@ -148,6 +137,18 @@ desktop/src/            Electron shell around agent/src — the app to actually 
 ```
 
 ## How the interesting parts work
+
+**Architecture.**
+
+```
+Phone (Expo app)  ──HTTP + WebSocket──▶  Agent (Node, on your PC)  ──▶  League Client API
+        ▲                                        │
+        └────────── Expo push ───────────────────┘   "Queue popped!"
+```
+
+The agent talks to the **LCU** (League Client Update) API — the same local HTTPS API the client's
+own UI uses. It reads the port and auth token from the running `LeagueClientUx.exe` process, so
+there's nothing to configure.
 
 **Finding the client.** `credentials.ts` queries `Win32_Process` for `LeagueClientUx.exe` and pulls
 `--app-port` and `--remoting-auth-token` off its command line, falling back to the `lockfile` in the
