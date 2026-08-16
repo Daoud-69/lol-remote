@@ -18,7 +18,8 @@ import {
   startQueue,
   stopQueue,
 } from "./lcu/actions.js";
-import type { ServerMessage } from "./types.js";
+import { listPages, readCatalog, recommendedPages } from "./lcu/runes.js";
+import type { PositionPreference, ServerMessage } from "./types.js";
 
 export interface ServerHandle {
   getConnectedPhoneCount: () => number;
@@ -119,6 +120,72 @@ export async function startServer(
       const championId = Number(req.params.championId);
       const inChampSelect = session.getState().phase === "ChampSelect";
       return session.getGameData().getSkins(championId, inChampSelect);
+    });
+  });
+
+  // --- Runes ---------------------------------------------------------------
+
+  /** Every style, slot and perk — enough to render the rune editor offline. */
+  app.get("/api/runes/catalog", (_req, res) => {
+    void run(res, async () => readCatalog(session.getClient()));
+  });
+
+  /** The player's own saved pages, so the editor can seed from one. */
+  app.get("/api/runes/pages", (_req, res) => {
+    void run(res, async () => listPages(session.getClient()));
+  });
+
+  /**
+   * The client's own suggestions. Position is optional — the endpoint needs
+   * one, and "NONE" is the neutral answer for modes without roles.
+   */
+  app.get("/api/runes/recommended/:championId", (req, res) => {
+    void run(res, async () => {
+      const championId = Number(req.params.championId);
+      if (!championId) throw new HttpError(400, "championId is required.");
+      const position = String(req.query.position ?? "").toUpperCase();
+      return recommendedPages(session.getClient(), championId, position);
+    });
+  });
+
+  app.delete("/api/runes/:championId", (req, res) => {
+    void run(res, async () => {
+      const championId = Number(req.params.championId);
+      if (!championId) throw new HttpError(400, "championId is required.");
+      return session.clearRunePage(championId);
+    });
+  });
+
+  // --- Lobby ---------------------------------------------------------------
+
+  const VALID_POSITIONS = new Set([
+    "TOP",
+    "JUNGLE",
+    "MIDDLE",
+    "BOTTOM",
+    "UTILITY",
+    "FILL",
+    "UNSELECTED",
+  ]);
+
+  app.post("/api/positions", (req, res) => {
+    void run(res, async () => {
+      const first = String(req.body?.first ?? "UNSELECTED").toUpperCase();
+      const second = String(req.body?.second ?? "UNSELECTED").toUpperCase();
+
+      for (const value of [first, second]) {
+        if (!VALID_POSITIONS.has(value)) {
+          throw new HttpError(400, `"${value}" is not a role the client accepts.`);
+        }
+      }
+      if (first === second && first !== "UNSELECTED" && first !== "FILL") {
+        throw new HttpError(400, "Pick two different roles.");
+      }
+
+      return session.updatePositions(
+        first as PositionPreference,
+        second as PositionPreference,
+      );
     });
   });
 

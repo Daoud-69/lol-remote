@@ -1,5 +1,11 @@
 import { LcuClient, LcuError } from "./client.js";
-import type { ChampSelectState, MyAction, TeammateSlot } from "../types.js";
+import type {
+  ChampSelectState,
+  LobbyPositions,
+  MyAction,
+  PositionPreference,
+  TeammateSlot,
+} from "../types.js";
 
 /** Accepts the ready check. Harmless to call when no check is pending. */
 export async function acceptReadyCheck(lcu: LcuClient): Promise<void> {
@@ -62,6 +68,86 @@ export async function setWardSkin(lcu: LcuClient, wardSkinId: number): Promise<v
 /** ARAM/Swiftplay: swap with a champion sitting on the bench. */
 export async function benchSwap(lcu: LcuClient, championId: number): Promise<void> {
   await lcu.post(`/lol-champ-select/v1/session/bench/swap/${championId}`);
+}
+
+// --- Lobby role selection --------------------------------------------------
+
+/**
+ * Sets the two role preferences the lobby's position selector shows.
+ *
+ * The client wants both slots on every call — sending only `firstPreference`
+ * silently blanks the second — so callers pass the pair they want to end up
+ * with, not a delta.
+ */
+export async function setPositionPreferences(
+  lcu: LcuClient,
+  first: PositionPreference,
+  second: PositionPreference,
+): Promise<void> {
+  await lcu.put("/lol-lobby/v2/lobby/members/localMember/position-preferences", {
+    firstPreference: first,
+    secondPreference: second,
+  });
+}
+
+interface RawLobbyMember {
+  firstPositionPreference: string | null;
+  secondPositionPreference: string | null;
+}
+
+interface RawLobby {
+  gameConfig?: { showPositionSelector?: boolean };
+  localMember?: RawLobbyMember;
+}
+
+/** Current role selector state, or null when we are not in a lobby at all. */
+export async function readPositions(lcu: LcuClient): Promise<LobbyPositions | null> {
+  try {
+    const lobby = await lcu.get<RawLobby>("/lol-lobby/v2/lobby");
+    return {
+      first: (lobby.localMember?.firstPositionPreference || "UNSELECTED") as PositionPreference,
+      second: (lobby.localMember?.secondPositionPreference || "UNSELECTED") as PositionPreference,
+      selectable: Boolean(lobby.gameConfig?.showPositionSelector),
+    };
+  } catch {
+    // 404 here just means "no lobby", which is not worth surfacing as an error.
+    return null;
+  }
+}
+
+// --- Champ select ----------------------------------------------------------
+
+/**
+ * Declares an intended pick during the planning phase, before any action is in
+ * progress. This is what puts your champion on the team's screen at the very
+ * start of a draft; it is not a hover and does not commit anything.
+ */
+export async function declarePickIntent(
+  lcu: LcuClient,
+  championId: number,
+): Promise<void> {
+  await lcu.patch("/lol-champ-select/v1/session/my-selection", { championId });
+}
+
+/** Champions still legal to pick right now. Empty set outside champ select. */
+export async function pickableChampionIds(lcu: LcuClient): Promise<Set<number>> {
+  try {
+    return new Set(
+      await lcu.get<number[]>("/lol-champ-select/v1/pickable-champion-ids"),
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+export async function bannableChampionIds(lcu: LcuClient): Promise<Set<number>> {
+  try {
+    return new Set(
+      await lcu.get<number[]>("/lol-champ-select/v1/bannable-champion-ids"),
+    );
+  } catch {
+    return new Set();
+  }
 }
 
 export async function startQueue(lcu: LcuClient): Promise<void> {
@@ -146,6 +232,7 @@ export function findMyAction(session: RawSession): MyAction | null {
 export function parseSession(
   raw: RawSession,
   selection: ChampSelectState["selection"],
+  requested?: LobbyPositions | null,
 ): ChampSelectState {
   const me = (raw.myTeam ?? []).find((p) => p.cellId === raw.localPlayerCellId);
 
@@ -156,6 +243,20 @@ export function parseSession(
     ? { ...selection, championId: selection.championId || me?.championId || 0 }
     : null;
 
+  // The client spells positions lowercase here and uppercase everywhere else.
+  const assigned = (me?.assignedPosition ?? "").toUpperCase();
+
+  // "FILL" means we asked for anything, so nothing counts as an autofill. With
+  // no role selector at all (ARAM) there is no assignment to compare against.
+  const asked = [requested?.first, requested?.second].filter(
+    (p): p is PositionPreference => Boolean(p) && p !== "UNSELECTED",
+  );
+  const autofilled =
+    Boolean(assigned) &&
+    asked.length > 0 &&
+    !asked.includes("FILL") &&
+    !asked.includes(assigned as PositionPreference);
+
   return {
     phase: raw.timer?.phase ?? "",
     timeLeftMs: raw.timer?.adjustedTimeLeftInPhase ?? 0,
@@ -164,6 +265,8 @@ export function parseSession(
     myTeam: (raw.myTeam ?? []).map((p) => toSlot(p, raw.localPlayerCellId)),
     theirTeam: (raw.theirTeam ?? []).map((p) => toSlot(p, raw.localPlayerCellId)),
     bans: raw.bans ?? { myTeamBans: [], theirTeamBans: [] },
+    myAssignedPosition: assigned,
+    autofilled,
     benchEnabled: Boolean(raw.benchEnabled),
     benchChampionIds: (raw.benchChampions ?? []).map((c) => c.championId),
     selection: resolvedSelection,

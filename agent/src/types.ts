@@ -56,6 +56,13 @@ export interface ChampSelectState {
   myTeam: TeammateSlot[];
   theirTeam: TeammateSlot[];
   bans: { myTeamBans: number[]; theirTeamBans: number[] };
+  /** Uppercased role the client assigned us, "" in modes without roles. */
+  myAssignedPosition: string;
+  /**
+   * True when the assigned role is neither of the two we asked for — the case
+   * the per-role pick lists exist to survive.
+   */
+  autofilled: boolean;
   /** ARAM/Swiftplay reroll bench. */
   benchEnabled: boolean;
   benchChampionIds: number[];
@@ -97,22 +104,135 @@ export interface Skin {
   chromas: { id: number; name: string; colors: string[]; unlocked: boolean }[];
 }
 
+/** The five Summoner's Rift roles, spelled the way the client spells them. */
+export type Position = "TOP" | "JUNGLE" | "MIDDLE" | "BOTTOM" | "UTILITY";
+
+export const POSITIONS: Position[] = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTILITY"];
+
+/** What the lobby's role selector accepts, on top of the five real roles. */
+export type PositionPreference = Position | "FILL" | "UNSELECTED";
+
+export interface LobbyPositions {
+  first: PositionPreference;
+  second: PositionPreference;
+  /** False in modes with no role selector (ARAM, Arena, most customs). */
+  selectable: boolean;
+}
+
+/**
+ * A rune page as the client stores it: two styles plus nine perk ids, ordered
+ * keystone, three primary minors, two secondary minors, three stat shards.
+ */
+export interface RunePage {
+  primaryStyleId: number;
+  secondaryStyleId: number;
+  selectedPerkIds: number[];
+}
+
+/**
+ * What to do when we end up in a given role. The champion list is ordered — we
+ * take the first entry that is still legal, so a banned or taken first choice
+ * falls through to the second and third instead of stalling.
+ */
+export interface RolePreset {
+  championIds: number[];
+  /** 0 = leave the slot alone and use the global preset instead. */
+  spell1Id: number;
+  spell2Id: number;
+}
+
 export interface AutomationSettings {
   /** Auto-accept the ready check the moment it appears. */
   autoAccept: boolean;
   /** Wait this long before accepting, so you can still decline manually. */
   autoAcceptDelayMs: number;
-  /** Hover + lock this champion when it becomes our pick turn. 0 = off. */
-  autoPickChampionId: number;
+
+  /** Pushed to the lobby's role selector when the phone changes them. */
+  primaryPosition: PositionPreference;
+  secondaryPosition: PositionPreference;
+
+  /**
+   * Per-role pick lists. The agent picks from the list matching the role the
+   * client actually assigned, which is what makes an autofill land on a
+   * champion you can play rather than on your mid-lane main.
+   */
+  rolePresets: Record<Position, RolePreset>;
+  /** Used when there is no assigned role at all — ARAM, blind pick, customs. */
+  fallbackChampionIds: number[];
   autoPickLock: boolean;
-  /** Ban this champion when it becomes our ban turn. 0 = off. */
-  autoBanChampionId: number;
+  /** Declare the intended champion during the planning phase, before bans. */
+  declarePickIntent: boolean;
+
+  /** Ordered ban preferences; the first one still bannable wins. */
+  banChampionIds: number[];
   autoBanLock: boolean;
+  /** Never ban a champion a teammate has already declared. */
+  protectTeammatePicks: boolean;
+
   /** Applied on entering champ select. 0 = leave alone. */
   autoSpell1Id: number;
   autoSpell2Id: number;
+
+  /** Rune page to apply per champion id, once that champion is locked. */
+  runePages: Record<number, RunePage>;
+  applyRunes: boolean;
+
   /** Seconds of remaining turn time at which we force the lock as a safety net. */
   panicLockAtSeconds: number;
+}
+
+/**
+ * What the phone is allowed to send to `/api/automation`.
+ *
+ * The two record-valued settings merge per key rather than wholesale, so a
+ * patch carries only the roles or champions it means to change — sending a
+ * full `Record<Position, …>` just to edit one role would race every other tab.
+ */
+export type AutomationPatch = Partial<
+  Omit<AutomationSettings, "rolePresets" | "runePages">
+> & {
+  rolePresets?: Partial<Record<Position, RolePreset>>;
+  runePages?: Record<number, RunePage>;
+};
+
+// --- Rune catalog ----------------------------------------------------------
+
+export interface PerkSlot {
+  type: "kKeyStone" | "kMixedRegularSplashable" | "kStatMod";
+  perkIds: number[];
+}
+
+export interface PerkStyle {
+  id: number;
+  name: string;
+  iconPath: string;
+  allowedSubStyles: number[];
+  slots: PerkSlot[];
+}
+
+export interface Perk {
+  id: number;
+  name: string;
+  shortDesc: string;
+  iconPath: string;
+  styleId: number;
+  slotType: string;
+}
+
+export interface RuneCatalog {
+  styles: PerkStyle[];
+  perks: Perk[];
+}
+
+/** One of the client's own suggestions for a champion in a role. */
+export interface RecommendedRunePage extends RunePage {
+  /** Stable id from the client, used only as a React key. */
+  recommendationId: string;
+  position: string;
+  keystoneId: number;
+  keystoneName: string;
+  keystoneIconPath: string;
+  summonerSpellIds: number[];
 }
 
 export interface AgentState {
@@ -121,6 +241,8 @@ export interface AgentState {
   phase: GameflowPhase;
   readyCheck: ReadyCheckState | null;
   champSelect: ChampSelectState | null;
+  /** Live role selector state, null outside a lobby. */
+  lobby: LobbyPositions | null;
   automation: AutomationSettings;
   /** Human-readable trail of what the agent did, newest first. */
   log: { at: number; message: string }[];

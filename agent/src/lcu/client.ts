@@ -103,6 +103,12 @@ export class LcuClient extends EventEmitter {
   patch<T>(endpoint: string, body?: unknown) {
     return this.request<T>("PATCH", endpoint, body);
   }
+  put<T>(endpoint: string, body?: unknown) {
+    return this.request<T>("PUT", endpoint, body);
+  }
+  delete<T>(endpoint: string) {
+    return this.request<T>("DELETE", endpoint);
+  }
 
   /** Fetches an asset (champion icon, skin splash) straight from the client. */
   getBinary(endpoint: string) {

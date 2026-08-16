@@ -10,6 +10,7 @@ gaming PC, then open the link it shows you on your phone. That's the whole setup
 
 **From the phone, live:**
 - Accept / decline the ready check (full-screen takeover + vibration + push notification)
+- Pick your two lobby roles — the same selector the client shows, driven from the phone
 - Hover and lock a champion on your pick turn, or ban on your ban turn
 - Set both summoner spells
 - Pick a skin once you're locked in (owned skins selectable, locked ones shown greyed)
@@ -18,10 +19,23 @@ gaming PC, then open the link it shows you on your phone. That's the whole setup
 
 **Automation, for when you're not looking at the phone either:**
 - Auto-accept, with an optional delay so you can still decline
-- Auto-pick and auto-ban a preset champion (hover-only or full lock)
-- Preset summoner spells applied on entering champ select
+- **A pick list per role**, tried in order — your second and third choices cover the case where
+  someone bans or takes your first. Because the list is chosen by the role the client *actually*
+  assigned, an autofill picks from that role's list instead of stranding you on your main.
+- **Declare your pick in the planning phase**, so the team sees your champion before bans start
+- An ordered ban list, which skips anything a teammate has already declared
+- Preset summoner spells, globally or per role
+- **A rune page per champion** — build one in the app, or load one of the client's own
+  recommendations for that champion and role. Applied automatically when you lock in.
 - **Panic lock** — commits whatever is hovered a few seconds before the timer expires, so a phone
   that loses signal mid-select doesn't leave you with a random champion
+
+**A note on rune pages.** Accounts have a hard cap on how many rune pages they can hold, so
+"a page per champion" isn't something the client can store. Instead the agent keeps exactly one
+page of its own, named `LoL Remote — <champion>`, and rewrites it each time you lock in. Pages you
+made yourself are never touched. If your account is at its cap and the agent has no page of its
+own yet, it says so and does nothing rather than deleting one of yours to make room — free a slot
+in the client once, and it will reuse that slot from then on.
 
 ## Setup
 
@@ -70,6 +84,11 @@ This prints the same pairing banner to the terminal and runs the identical serve
 app each time, but it's a developer workflow, not something to hand to a friend.
 
 ### 2. App (on your phone)
+
+**The remote the agent serves is [`web/`](web)** — open the address the agent window shows and you
+have it, no install. [`app/`](app) is a second, Expo-based client kept for the native extras
+(vibration, push while closed); it has **not** been updated for role presets, backup picks or
+runes, and its auto-pick / auto-ban controls write settings the agent no longer reads.
 
 The project is already scaffolded on **Expo SDK 57** with dependencies resolved, so this is just:
 
@@ -165,6 +184,25 @@ player's action. `findMyAction` flattens them and finds the one where `actorCell
 champion, and the agent resolves the current action itself, so a stale phone can't lock into the
 wrong slot.
 
+**Which champion to pick.** The agent reads `assignedPosition` off its own slot in `myTeam`, looks
+up that role's list, and takes the first entry the client still reports in
+`pickable-champion-ids` and that nobody has banned or locked. Autofill needs no special case: the
+role the client assigned *is* the lookup key, so being handed support instead of mid simply reads
+a different list. Bans work the same way against `bannable-champion-ids`, minus anything a
+teammate has declared via `championPickIntent`.
+
+**Declaring a pick.** During the `PLANNING` phase there is no action in progress to patch, so
+intent goes through `PATCH /lol-champ-select/v1/session/my-selection` with just a `championId`.
+That is what populates `championPickIntent` on your team slot and puts the champion on everyone's
+screen; it commits nothing.
+
+**Runes.** `/lol-perks/v1/styles` gives the tree structure (a keystone slot, three minor slots and
+three stat slots per tree) and `/lol-perks/v1/perks` the individual runes, which is everything the
+editor needs to render offline. `/lol-perks/v1/recommended-pages/champion/{id}/position/{pos}/map/11`
+returns the client's own suggestions in exactly the shape a page is written in. One wrinkle worth
+knowing: a page is `primaryStyleId` plus `subStyleId` — the secondary tree is called `subStyleId`
+on both read and write, even though the same object also carries a `secondaryStyleName`.
+
 **Skins.** `PATCH /lol-champ-select/v1/session/my-selection` with `selectedSkinId`. The client only
 honours it after your pick is locked, which is why the skin tab tells you to lock in first.
 
@@ -200,12 +238,25 @@ everything except the LCU calls themselves:
 - The `desktop/` Electron build launched against a **live League client mid-match** and correctly
   reported "Connected to the League client" in its status card and activity log
 
-**Not yet tested:** every call that needs a live League client — accept, pick, ban, spells, skins,
-bench swap. Those are the endpoints to watch on first real use.
+Since verified on Windows against a **live League client**, in a real ranked lobby and queue:
+
+- Auto-accept fired on a real queue pop, preset spells applied, and the auto-ban locked
+- Role preferences round-trip: `POST /api/positions` writes the lobby's selector, the client
+  reflects it, and the lobby event reconciles agent state (Mid/Top, Fill, and back to Jungle/Support)
+- Role presets and backup picks persist through the API to `~/.lol-remote/config.json`, and old
+  single-champion configs migrate into the new lists on first read
+- Rune catalog (5 styles × 7 slots, 69 selectable perks), the player's saved pages, and the
+  client's per-champion recommendations all serve to the phone
+- The rune writer refuses safely on a full account: it declines with a readable message and leaves
+  every player-made page untouched, and rejects a page that isn't exactly 9 perks
+- With one slot free, applying runes creates the page with the exact styles and perks requested and
+  makes it current; applying a second champion's runes **reuses the same slot** rather than
+  consuming another, and both times the player's own pages came back byte-identical
+
+**Not yet tested with a live client:** pick, skin and bench swap.
 
 ## Ideas for later
 
 - QR pairing (`expo-camera`) instead of typing the IP and code
-- Rune page selection — `/lol-perks/v1/pages`
-- Position-aware presets: auto-pick a different champion per assigned role
+- Bring [`app/`](app) up to parity with `web/` (roles, backup picks, runes)
 - Cloud relay so it works off your home Wi-Fi (a small WebSocket server both sides dial out to)

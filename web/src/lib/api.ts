@@ -1,4 +1,15 @@
-import type { AutomationSettings, Champion, Skin, SummonerSpell } from "../types";
+import type {
+  AutomationPatch,
+  AutomationSettings,
+  Champion,
+  LobbyPositions,
+  PositionPreference,
+  RecommendedRunePage,
+  RuneCatalog,
+  Skin,
+  StoredRunePage,
+  SummonerSpell,
+} from "../types";
 
 export interface Connection {
   host: string;
@@ -30,6 +41,11 @@ export function spellIconUrl(connection: Connection, iconPath: string): string {
 /** Splash art doesn't live at a predictable path either — each skin carries its own `splashPath` from the catalog. */
 export function skinSplashUrl(connection: Connection, splashPath: string): string {
   return `${baseUrl(connection)}/api/asset${splashPath}?code=${encodeURIComponent(connection.code)}`;
+}
+
+/** Perk and style icons carry their own path, same as spells and splashes. */
+export function perkIconUrl(connection: Connection, iconPath: string): string {
+  return `${baseUrl(connection)}/api/asset${iconPath}?code=${encodeURIComponent(connection.code)}`;
 }
 
 export function profileIconUrl(connection: Connection, profileIconId: number): string {
@@ -123,10 +139,25 @@ export const api = {
   startQueue: (c: Connection) => post<{ ok: true }>(c, "/api/queue/start"),
   stopQueue: (c: Connection) => post<{ ok: true }>(c, "/api/queue/stop"),
 
-  setAutomation: (c: Connection, patch: Partial<AutomationSettings>) =>
+  setAutomation: (c: Connection, patch: AutomationPatch) =>
     post<AutomationSettings>(c, "/api/automation", patch),
+
+  setPositions: (c: Connection, first: PositionPreference, second: PositionPreference) =>
+    post<LobbyPositions | null>(c, "/api/positions", { first, second }),
 
   champions: (c: Connection) => call<Champion[]>(c, "/api/champions"),
   spells: (c: Connection) => call<SummonerSpell[]>(c, "/api/spells"),
   skins: (c: Connection, championId: number) => call<Skin[]>(c, `/api/skins/${championId}`),
+
+  runeCatalog: (c: Connection) => call<RuneCatalog>(c, "/api/runes/catalog"),
+  runePages: (c: Connection) => call<StoredRunePage[]>(c, "/api/runes/pages"),
+
+  recommendedRunes: (c: Connection, championId: number, position: string) =>
+    call<RecommendedRunePage[]>(
+      c,
+      `/api/runes/recommended/${championId}?position=${encodeURIComponent(position || "NONE")}`,
+    ),
+
+  clearRunePage: (c: Connection, championId: number) =>
+    call<AutomationSettings>(c, `/api/runes/${championId}`, { method: "DELETE" }),
 };

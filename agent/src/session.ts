@@ -4,19 +4,30 @@ import { waitForCredentials } from "./lcu/credentials.js";
 import { GameData } from "./lcu/gamedata.js";
 import {
   acceptReadyCheck,
+  bannableChampionIds,
   completeAction,
+  declarePickIntent,
   describeLcuError,
   parseSession,
+  pickableChampionIds,
+  readPositions,
   resolveAction,
+  setPositionPreferences,
   setSpells,
   type RawSession,
 } from "./lcu/actions.js";
-import type {
-  AgentState,
-  AutomationSettings,
-  ChampSelectState,
-  GameflowPhase,
-  ServerMessage,
+import { applyRunePage } from "./lcu/runes.js";
+import {
+  POSITIONS,
+  type AgentState,
+  type AutomationPatch,
+  type AutomationSettings,
+  type ChampSelectState,
+  type GameflowPhase,
+  type LobbyPositions,
+  type Position,
+  type RolePreset,
+  type ServerMessage,
 } from "./types.js";
 import { loadAutomation, saveAutomation } from "./config.js";
 
@@ -24,6 +35,7 @@ const TOPICS = [
   "OnJsonApiEvent_lol-gameflow_v1_gameflow-phase",
   "OnJsonApiEvent_lol-matchmaking_v1_ready-check",
   "OnJsonApiEvent_lol-champ-select_v1_session",
+  "OnJsonApiEvent_lol-lobby_v2_lobby",
 ];
 
 /**
@@ -37,6 +49,9 @@ export class Session extends EventEmitter {
   private panicTimer: NodeJS.Timeout | null = null;
   private lastAutomatedActionId: number | null = null;
   private spellsAppliedForSession = false;
+  private declaredForSession = false;
+  /** Champion whose runes we already pushed, so a re-render does not re-apply. */
+  private runesAppliedFor = 0;
 
   private state: AgentState = {
     connectedToClient: false,
@@ -44,6 +59,7 @@ export class Session extends EventEmitter {
     phase: "None",
     readyCheck: null,
     champSelect: null,
+    lobby: null,
     automation: loadAutomation(),
     log: [],
   };
@@ -109,7 +125,9 @@ export class Session extends EventEmitter {
         phase: "None",
         readyCheck: null,
         champSelect: null,
+        lobby: null,
       };
+      this.resetChampSelectFlags();
       this.publish();
       await delay(2000);
     }
@@ -123,9 +141,7 @@ export class Session extends EventEmitter {
         this.state.phase = (event.data as GameflowPhase) ?? "None";
         if (this.state.phase !== "ChampSelect") {
           this.state.champSelect = null;
-          this.spellsAppliedForSession = false;
-          this.lastAutomatedActionId = null;
-          this.clearPanicTimer();
+          this.resetChampSelectFlags();
         }
         this.publish();
         return;
@@ -133,6 +149,14 @@ export class Session extends EventEmitter {
 
       if (event.uri === "/lol-matchmaking/v1/ready-check") {
         await this.onReadyCheck(event);
+        return;
+      }
+
+      if (event.uri === "/lol-lobby/v2/lobby") {
+        // The role selector is the one bit of lobby state the phone drives, and
+        // it can change from the PC too, so mirror it rather than assume.
+        this.state.lobby = this.lcu ? await readPositions(this.lcu) : null;
+        this.publish();
         return;
       }
 
@@ -195,17 +219,28 @@ export class Session extends EventEmitter {
   private async onChampSelect(event: LcuEvent): Promise<void> {
     if (event.eventType === "Delete" || !event.data) {
       this.state.champSelect = null;
-      this.spellsAppliedForSession = false;
-      this.lastAutomatedActionId = null;
-      this.clearPanicTimer();
+      this.resetChampSelectFlags();
       this.publish();
       return;
     }
 
     const raw = event.data as RawSession;
     const previous = this.state.champSelect;
-    this.state.champSelect = parseSession(raw, await this.readSelection());
+    this.state.champSelect = parseSession(
+      raw,
+      await this.readSelection(),
+      this.state.lobby,
+    );
     this.publish();
+
+    const assigned = this.state.champSelect.myAssignedPosition;
+    if (assigned && assigned !== previous?.myAssignedPosition) {
+      this.log(
+        this.state.champSelect.autofilled
+          ? `Autofilled to ${titleCase(assigned)} — using that role's picks.`
+          : `Assigned ${titleCase(assigned)}.`,
+      );
+    }
 
     const action = this.state.champSelect.myAction;
     if (action?.isInProgress && previous?.myAction?.id !== action.id) {
@@ -232,24 +267,86 @@ export class Session extends EventEmitter {
 
   // --- Automation ----------------------------------------------------------
 
+  /**
+   * The pick list for the role we were actually given.
+   *
+   * This is the whole autofill story: the client decides our role, we look up
+   * what we said we'd play there. With no role assigned (ARAM, blind pick) we
+   * fall back to the single flat list.
+   */
+  private presetForAssignedRole(): RolePreset {
+    const { automation } = this.state;
+    const assigned = this.state.champSelect?.myAssignedPosition ?? "";
+
+    if (isPosition(assigned)) return automation.rolePresets[assigned];
+    return {
+      championIds: automation.fallbackChampionIds,
+      spell1Id: 0,
+      spell2Id: 0,
+    };
+  }
+
+  /** First champion in `candidates` that the client will still accept. */
+  private firstLegal(candidates: number[], legal: Set<number>, taken: Set<number>): number {
+    return (
+      candidates.find(
+        (id) => id > 0 && !taken.has(id) && (legal.size === 0 || legal.has(id)),
+      ) ?? 0
+    );
+  }
+
+  /** Champions already off the table for a pick: banned, or locked by anyone. */
+  private unavailableForPick(): Set<number> {
+    const select = this.state.champSelect;
+    if (!select) return new Set();
+    return new Set([
+      ...select.bans.myTeamBans,
+      ...select.bans.theirTeamBans,
+      ...select.myTeam.map((slot) => (slot.isLocalPlayer ? 0 : slot.championId)),
+    ]);
+  }
+
+  /** Champions we should not spend a ban on. */
+  private unavailableForBan(): Set<number> {
+    const select = this.state.champSelect;
+    if (!select) return new Set();
+
+    const taken = new Set([...select.bans.myTeamBans, ...select.bans.theirTeamBans]);
+    if (this.state.automation.protectTeammatePicks) {
+      // Banning the champion a teammate just declared is the classic way an
+      // auto-ban list ruins a game before it starts.
+      for (const slot of select.myTeam) {
+        if (slot.isLocalPlayer) continue;
+        if (slot.championPickIntent > 0) taken.add(slot.championPickIntent);
+        if (slot.championId > 0) taken.add(slot.championId);
+      }
+    }
+    return taken;
+  }
+
   private async runChampSelectAutomation(): Promise<void> {
     const { automation } = this.state;
     const select = this.state.champSelect;
     if (!this.lcu || !select) return;
 
-    if (
-      !this.spellsAppliedForSession &&
-      automation.autoSpell1Id > 0 &&
-      automation.autoSpell2Id > 0
-    ) {
+    const preset = this.presetForAssignedRole();
+
+    // Role presets override the global spells, which is what keeps an autofill
+    // to support from walking in with Smite.
+    const spell1 = preset.spell1Id || automation.autoSpell1Id;
+    const spell2 = preset.spell2Id || automation.autoSpell2Id;
+    if (!this.spellsAppliedForSession && spell1 > 0 && spell2 > 0) {
       this.spellsAppliedForSession = true;
       try {
-        await setSpells(this.lcu, automation.autoSpell1Id, automation.autoSpell2Id);
+        await setSpells(this.lcu, spell1, spell2);
         this.log("Applied preset summoner spells.");
       } catch (error) {
         this.log(`Could not set spells: ${describeLcuError(error)}`);
       }
     }
+
+    await this.maybeDeclareIntent(preset);
+    await this.maybeApplyRunes();
 
     const action = select.myAction;
     if (!action?.isInProgress || action.completed) {
@@ -261,25 +358,89 @@ export class Session extends EventEmitter {
     if (this.lastAutomatedActionId !== action.id) {
       this.lastAutomatedActionId = action.id;
 
-      const championId =
-        action.type === "ban"
-          ? automation.autoBanChampionId
-          : automation.autoPickChampionId;
-      const lock =
-        action.type === "ban" ? automation.autoBanLock : automation.autoPickLock;
+      const banning = action.type === "ban";
+      const candidates = banning ? automation.banChampionIds : preset.championIds;
+      const legal = banning
+        ? await bannableChampionIds(this.lcu)
+        : await pickableChampionIds(this.lcu);
+      const taken = banning ? this.unavailableForBan() : this.unavailableForPick();
+
+      const championId = this.firstLegal(candidates, legal, taken);
+      const lock = banning ? automation.autoBanLock : automation.autoPickLock;
 
       if (championId > 0) {
+        const rank = candidates.indexOf(championId);
         try {
           await resolveAction(this.lcu, action.id, championId, lock);
           const name = this.gameData?.championName(championId) ?? String(championId);
-          this.log(`Auto-${action.type}: ${name}${lock ? " (locked)" : " (hovered)"}.`);
+          const fallback = rank > 0 ? ` (choice ${rank + 1})` : "";
+          this.log(
+            `Auto-${action.type}: ${name}${fallback}${lock ? " (locked)" : " (hovered)"}.`,
+          );
         } catch (error) {
           this.log(`Auto-${action.type} failed: ${describeLcuError(error)}`);
         }
+      } else if (candidates.length > 0) {
+        this.log(
+          `No ${action.type} left from your list — every choice is banned or taken.`,
+        );
       }
     }
 
     this.armPanicLock(action.id, select.timeLeftMs);
+  }
+
+  /**
+   * Puts our intended champion on the team's screen during the planning phase,
+   * before any ban happens. Purely declarative — it commits nothing.
+   */
+  private async maybeDeclareIntent(preset: RolePreset): Promise<void> {
+    const select = this.state.champSelect;
+    if (!this.lcu || !select) return;
+    if (!this.state.automation.declarePickIntent || this.declaredForSession) return;
+    if (select.phase.toUpperCase() !== "PLANNING") return;
+
+    const championId = this.firstLegal(
+      preset.championIds,
+      await pickableChampionIds(this.lcu),
+      this.unavailableForPick(),
+    );
+    if (championId <= 0) return;
+
+    this.declaredForSession = true;
+    try {
+      await declarePickIntent(this.lcu, championId);
+      const name = this.gameData?.championName(championId) ?? String(championId);
+      this.log(`Declared ${name} in the planning phase.`);
+    } catch (error) {
+      this.log(`Could not declare a pick: ${describeLcuError(error)}`);
+    }
+  }
+
+  /**
+   * Pushes the rune page saved for whatever we locked. Runs off the locked
+   * champion rather than the hover, since hovers change and rewriting the page
+   * on every hover would thrash the client.
+   */
+  private async maybeApplyRunes(): Promise<void> {
+    const select = this.state.champSelect;
+    if (!this.lcu || !select) return;
+    if (!this.state.automation.applyRunes) return;
+
+    const championId = select.selection?.championId ?? 0;
+    if (championId <= 0 || championId === this.runesAppliedFor) return;
+
+    const page = this.state.automation.runePages[championId];
+    if (!page) return;
+
+    this.runesAppliedFor = championId;
+    const name = this.gameData?.championName(championId) ?? String(championId);
+    try {
+      await applyRunePage(this.lcu, page, name);
+      this.log(`Applied your ${name} rune page.`);
+    } catch (error) {
+      this.log(`Could not apply runes: ${describeLcuError(error)}`);
+    }
   }
 
   /**
@@ -315,11 +476,66 @@ export class Session extends EventEmitter {
     this.panicTimer = null;
   }
 
-  updateAutomation(patch: Partial<AutomationSettings>): AutomationSettings {
-    this.state.automation = { ...this.state.automation, ...patch };
+  /** Everything that is scoped to one champ select and must not leak into the next. */
+  private resetChampSelectFlags(): void {
+    this.spellsAppliedForSession = false;
+    this.declaredForSession = false;
+    this.lastAutomatedActionId = null;
+    this.runesAppliedFor = 0;
+    this.clearPanicTimer();
+  }
+
+  updateAutomation(patch: AutomationPatch): AutomationSettings {
+    const previous = this.state.automation;
+    this.state.automation = {
+      ...previous,
+      ...patch,
+      // Nested records must merge per key, or setting one role's list would
+      // wipe the other four.
+      rolePresets: { ...previous.rolePresets, ...patch.rolePresets },
+      runePages: { ...previous.runePages, ...patch.runePages },
+    };
     saveAutomation(this.state.automation);
     this.publish();
     return this.state.automation;
+  }
+
+  /** Deletes a champion's saved rune page — a merge-patch can't express removal. */
+  clearRunePage(championId: number): AutomationSettings {
+    const runePages = { ...this.state.automation.runePages };
+    delete runePages[championId];
+    this.state.automation = { ...this.state.automation, runePages };
+    saveAutomation(this.state.automation);
+    this.publish();
+    return this.state.automation;
+  }
+
+  /** Pushes role preferences to the lobby and remembers them for next time. */
+  async updatePositions(
+    first: LobbyPositions["first"],
+    second: LobbyPositions["second"],
+  ): Promise<LobbyPositions | null> {
+    if (!this.lcu) throw new Error("Not connected to the League client yet.");
+
+    await setPositionPreferences(this.lcu, first, second);
+    this.state.automation = {
+      ...this.state.automation,
+      primaryPosition: first,
+      secondaryPosition: second,
+    };
+    saveAutomation(this.state.automation);
+
+    // Reading straight back races the client — the lobby it serves can still be
+    // the pre-write one for a beat, which would echo stale roles to the phone.
+    // Report what we set and let the lobby event reconcile a moment later.
+    this.state.lobby = {
+      first,
+      second,
+      selectable: this.state.lobby?.selectable ?? true,
+    };
+    this.log(`Set roles to ${titleCase(first)} / ${titleCase(second)}.`);
+    this.publish();
+    return this.state.lobby;
   }
 
   // --- Snapshot ------------------------------------------------------------
@@ -356,9 +572,15 @@ export class Session extends EventEmitter {
       this.state.phase = "None";
     }
 
+    this.state.lobby = await readPositions(this.lcu);
+
     try {
       const raw = await this.lcu.get<RawSession>("/lol-champ-select/v1/session");
-      this.state.champSelect = parseSession(raw, await this.readSelection());
+      this.state.champSelect = parseSession(
+        raw,
+        await this.readSelection(),
+        this.state.lobby,
+      );
     } catch {
       this.state.champSelect = null;
     }
@@ -380,4 +602,13 @@ export class Session extends EventEmitter {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isPosition(value: string): value is Position {
+  return (POSITIONS as string[]).includes(value);
+}
+
+/** "UTILITY" reads badly in a log line; "Utility" does not. */
+function titleCase(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
 }
