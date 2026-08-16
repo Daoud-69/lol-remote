@@ -94,6 +94,16 @@ export default function App() {
     void api.champions(connection).then(setChampions).catch(() => undefined);
   }, [state?.phase, connection]);
 
+  // That snapshot goes stale the instant someone else picks or bans. Re-fetch
+  // right as our turn starts so the grid reflects what's actually still
+  // available, instead of whatever was true whenever champ select began.
+  const myActionId = state?.champSelect?.myAction?.id;
+  const myActionInProgress = state?.champSelect?.myAction?.isInProgress;
+  useEffect(() => {
+    if (!connection || !myActionInProgress) return;
+    void api.champions(connection).then(setChampions).catch(() => undefined);
+  }, [connection, myActionId, myActionInProgress]);
+
   const connect = async (next: Connection) => {
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next));
     setConnection(next);
