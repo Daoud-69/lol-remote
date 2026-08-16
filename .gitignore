@@ -5,9 +5,11 @@ node_modules/
 agent/dist/
 agent/build/
 
-# Desktop (Electron) build output
+# Desktop (Electron) build output. Only desktop/build/dist is output —
+# desktop/build itself is electron-builder's buildResources directory and holds
+# checked-in inputs like the app icon.
 desktop/out/
-desktop/build/
+desktop/build/dist/
 
 # Expo / Metro
 .expo/
