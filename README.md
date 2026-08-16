@@ -57,6 +57,13 @@ builds `web/` first and bundles it in as a resource, so the phone-facing web app
 installer with no extra step. The compiler binaries ship inside the `electron-builder` npm package,
 so nothing extra needs installing on the build machine.
 
+**Windows will warn you before you can run it.** The first time you open the downloaded installer,
+you'll see a blue "Windows protected your PC" screen from Microsoft Defender SmartScreen. That's not
+a virus warning — it's what Windows shows for *any* new app from a developer who hasn't paid for a
+code-signing certificate (hundreds of dollars a year), regardless of what the app actually does.
+Click **More info**, then **Run anyway**. The full source is in this repo if you'd rather check what
+it does yourself before trusting it.
+
 **Running from source, for development:**
 
 ```bash
