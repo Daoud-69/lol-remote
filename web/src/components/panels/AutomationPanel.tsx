@@ -1,10 +1,10 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { ChevronRight, Sparkles } from "lucide-react";
 import { api, championIconUrl, spellIconUrl, type Connection } from "../../lib/api";
+import { useAutomation } from "../../hooks/useAutomation";
 import {
   POSITIONS,
   type AgentState,
-  type AutomationPatch,
   type AutomationSettings,
   type Champion,
   type Position,
@@ -42,7 +42,8 @@ export function AutomationPanel({
   spells: SummonerSpell[];
   onToast: (message: string, kind: "ok" | "error") => void;
 }) {
-  const settings = state.automation;
+  const onError = useCallback((message: string) => onToast(message, "error"), [onToast]);
+  const [settings, update] = useAutomation(state.automation, connection, onError);
   const assigned = state.champSelect?.myAssignedPosition ?? "";
 
   // Default the editor to the role you're actually in, which is where you'll
@@ -53,14 +54,6 @@ export function AutomationPanel({
   const [picker, setPicker] = useState<PickerTarget | null>(null);
   const [runeChampionId, setRuneChampionId] = useState(0);
 
-  const update = async (patch: AutomationPatch) => {
-    try {
-      await api.setAutomation(connection, patch);
-    } catch (error) {
-      onToast((error as Error).message, "error");
-    }
-  };
-
   const championName = (id: number) =>
     champions.find((c) => c.id === id)?.name ?? `Champion ${id}`;
 
@@ -70,14 +63,17 @@ export function AutomationPanel({
       : settings.rolePresets[tab];
 
   const setPresetChampions = (next: number[]) => {
-    if (tab === "NONE") return void update({ fallbackChampionIds: next });
-    void update({ rolePresets: { [tab]: { ...preset, championIds: next } } });
+    if (tab === "NONE") {
+      update({ fallbackChampionIds: next });
+      return;
+    }
+    update({ rolePresets: { [tab]: { ...preset, championIds: next } } });
   };
 
   const setPresetSpell = (slot: 1 | 2, spellId: number) => {
     if (tab === "NONE") return;
     const key = slot === 1 ? "spell1Id" : "spell2Id";
-    void update({ rolePresets: { [tab]: { ...preset, [key]: spellId } } });
+    update({ rolePresets: { [tab]: { ...preset, [key]: spellId } } });
   };
 
   const onGridSelect = (championId: number) => {
@@ -88,12 +84,12 @@ export function AutomationPanel({
       return;
     }
     if (picker.kind === "ban") {
-      void update({ banChampionIds: [...settings.banChampionIds, championId] });
+      update({ banChampionIds: [...settings.banChampionIds, championId] });
     } else if (picker.kind === "fallback") {
-      void update({ fallbackChampionIds: [...settings.fallbackChampionIds, championId] });
+      update({ fallbackChampionIds: [...settings.fallbackChampionIds, championId] });
     } else {
       const current = settings.rolePresets[picker.position];
-      void update({
+      update({
         rolePresets: {
           [picker.position]: { ...current, championIds: [...current.championIds, championId] },
         },
@@ -112,7 +108,7 @@ export function AutomationPanel({
           label="Auto-accept queue"
           help="Accepts the match the moment it pops."
           value={settings.autoAccept}
-          onChange={(v) => void update({ autoAccept: v })}
+          onChange={(v) => update({ autoAccept: v })}
         />
         {settings.autoAccept && (
           <div className="mt-3">
@@ -123,7 +119,7 @@ export function AutomationPanel({
               value={settings.autoAcceptDelayMs}
               options={[0, 1500, 4000, 8000]}
               format={(ms) => (ms === 0 ? "Instant" : `${ms / 1000}s`)}
-              onChange={(ms) => void update({ autoAcceptDelayMs: ms })}
+              onChange={(ms) => update({ autoAcceptDelayMs: ms })}
             />
             <Muted>A delay leaves you a window to decline from the phone.</Muted>
           </div>
@@ -221,13 +217,13 @@ export function AutomationPanel({
             label="Declare in the planning phase"
             help="Shows your champion to the team before bans start."
             value={settings.declarePickIntent}
-            onChange={(v) => void update({ declarePickIntent: v })}
+            onChange={(v) => update({ declarePickIntent: v })}
           />
           <ToggleRow
             label="Lock in automatically"
             help="Off means it only hovers, leaving the lock to you."
             value={settings.autoPickLock}
-            onChange={(v) => void update({ autoPickLock: v })}
+            onChange={(v) => update({ autoPickLock: v })}
           />
         </div>
       </Card>
@@ -242,7 +238,7 @@ export function AutomationPanel({
             connection={connection}
             mode="ban"
             emptyLabel="No auto-ban set."
-            onChange={(next) => void update({ banChampionIds: next })}
+            onChange={(next) => update({ banChampionIds: next })}
             onPick={() => setPicker({ kind: "ban" })}
           />
         </div>
@@ -250,13 +246,13 @@ export function AutomationPanel({
           label="Never ban a teammate's pick"
           help="Skips anyone your team has already declared."
           value={settings.protectTeammatePicks}
-          onChange={(v) => void update({ protectTeammatePicks: v })}
+          onChange={(v) => update({ protectTeammatePicks: v })}
         />
         <ToggleRow
           label="Lock ban automatically"
           help="Bans are rarely worth hesitating over."
           value={settings.autoBanLock}
-          onChange={(v) => void update({ autoBanLock: v })}
+          onChange={(v) => update({ autoBanLock: v })}
         />
       </Card>
 
@@ -266,7 +262,7 @@ export function AutomationPanel({
           label="Apply runes on lock"
           help="Writes the saved page for whatever you lock in."
           value={settings.applyRunes}
-          onChange={(v) => void update({ applyRunes: v })}
+          onChange={(v) => update({ applyRunes: v })}
         />
 
         <div className="mt-3 space-y-2">
@@ -319,7 +315,7 @@ export function AutomationPanel({
                   connection={connection}
                   current={current}
                   onSelect={(id) =>
-                    void update(
+                    update(
                       slot === 1
                         ? { autoSpell1Id: current === id ? 0 : id }
                         : { autoSpell2Id: current === id ? 0 : id },
@@ -343,7 +339,7 @@ export function AutomationPanel({
           value={settings.panicLockAtSeconds}
           options={[0, 3, 5, 8]}
           format={(s) => (s === 0 ? "Off" : `${s}s`)}
-          onChange={(s) => void update({ panicLockAtSeconds: s })}
+          onChange={(s) => update({ panicLockAtSeconds: s })}
         />
         <Muted>
           Commits whatever is hovered before the timer expires, so a phone that loses signal
@@ -387,7 +383,7 @@ export function AutomationPanel({
             initial={settings.runePages[runeChampionId]}
             onToast={onToast}
             onSave={(page: RunePage) => {
-              void update({ runePages: { [runeChampionId]: page } });
+              update({ runePages: { [runeChampionId]: page } });
               onToast(`Saved runes for ${championName(runeChampionId)}.`, "ok");
               setRuneChampionId(0);
             }}
