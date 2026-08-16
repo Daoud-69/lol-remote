@@ -48,6 +48,8 @@ export class Session extends EventEmitter {
   private gameData: GameData | null = null;
   private panicTimer: NodeJS.Timeout | null = null;
   private lastAutomatedActionId: number | null = null;
+  /** Action we have already reported as having no legal choice left. */
+  private exhaustedListForActionId: number | null = null;
   private spellsAppliedForSession = false;
   private declaredForSession = false;
   /** Champion whose runes we already pushed, so a re-render does not re-apply. */
@@ -354,10 +356,14 @@ export class Session extends EventEmitter {
       return;
     }
 
+    // During planning the client already reports the first ban as in progress,
+    // but it will not accept one yet and reports nothing as bannable. Acting
+    // here achieves nothing and — worse — used to burn this action's one-shot
+    // guard, so the real ban turn was skipped a minute later.
+    if (select.phase.toUpperCase() === "PLANNING") return;
+
     // One automated attempt per action, so a rejected pick does not spin.
     if (this.lastAutomatedActionId !== action.id) {
-      this.lastAutomatedActionId = action.id;
-
       const banning = action.type === "ban";
       const candidates = banning ? automation.banChampionIds : preset.championIds;
       const legal = banning
@@ -369,6 +375,11 @@ export class Session extends EventEmitter {
       const lock = banning ? automation.autoBanLock : automation.autoPickLock;
 
       if (championId > 0) {
+        // Consume the one-shot only once we are actually committing to a
+        // champion. Finding nothing legal can simply mean the client has not
+        // published its pickable/bannable lists yet, and the next session
+        // event is a free retry.
+        this.lastAutomatedActionId = action.id;
         const rank = candidates.indexOf(championId);
         try {
           await resolveAction(this.lcu, action.id, championId, lock);
@@ -380,10 +391,17 @@ export class Session extends EventEmitter {
         } catch (error) {
           this.log(`Auto-${action.type} failed: ${describeLcuError(error)}`);
         }
-      } else if (candidates.length > 0) {
-        this.log(
-          `No ${action.type} left from your list — every choice is banned or taken.`,
-        );
+      } else if (candidates.length > 0 && this.exhaustedListForActionId !== action.id) {
+        // Say this once per action rather than on every session event, and say
+        // which filter emptied the list — "nothing left" on its own gave no
+        // clue that the real problem was running a phase too early.
+        this.exhaustedListForActionId = action.id;
+        const blocked = candidates.filter((id) => taken.has(id)).length;
+        const detail =
+          blocked === candidates.length
+            ? "already banned or taken"
+            : `the client lists none of them as ${action.type}able right now`;
+        this.log(`No ${action.type} from your list — ${detail}.`);
       }
     }
 
@@ -481,6 +499,7 @@ export class Session extends EventEmitter {
     this.spellsAppliedForSession = false;
     this.declaredForSession = false;
     this.lastAutomatedActionId = null;
+    this.exhaustedListForActionId = null;
     this.runesAppliedFor = 0;
     this.clearPanicTimer();
   }
