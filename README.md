@@ -3,6 +3,10 @@
 Control League of Legends champion select from your phone: accept the ready check, pick or ban a
 champion, set summoner spells, and choose your skin — all while you're away from the PC.
 
+**[⬇ Download the latest release](https://github.com/Daoud-69/lol-remote/releases/latest)** — just
+run the installer, no separate setup needed. (Cloning/downloading this repo as source only gets you
+the code, not a runnable app — see [Setup](#setup) below if that's what you're after.)
+
 ```
 Phone (Expo app)  ──HTTP + WebSocket──▶  Agent (Node, on your PC)  ──▶  League Client API
         ▲                                        │
