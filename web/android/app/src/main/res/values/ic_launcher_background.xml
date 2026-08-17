@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Matches the app's own background, so the adaptive icon reads as one
+         piece rather than gold artwork floating on a white card. -->
+    <color name="ic_launcher_background">#09090B</color>
+</resources>
