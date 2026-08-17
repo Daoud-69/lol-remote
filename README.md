@@ -83,14 +83,25 @@ This prints the same pairing banner to the terminal and runs the identical serve
 `desktop/` app imports — useful for iterating on `agent/src` without rebuilding the whole Electron
 app each time, but it's a developer workflow, not something to hand to a friend.
 
-### 2. App (on your phone)
+### 2. Phone
 
-**The remote the agent serves is [`web/`](web)** — open the address the agent window shows and you
-have it, no install. [`app/`](app) is a second, Expo-based client kept for the native extras
-(vibration, push while closed); it has **not** been updated for role presets, backup picks or
-runes, and its auto-pick / auto-ban controls write settings the agent no longer reads.
+**There is nothing to install.** The agent serves the remote itself, so:
 
-The project is already scaffolded on **Expo SDK 57** with dependencies resolved, so this is just:
+1. Put the phone on the same Wi-Fi as the PC
+2. Open the address the agent window shows — something like `http://192.168.1.20:8777`
+3. Enter the six-digit pairing code next to it
+
+It remembers the connection, so afterwards you just open the page. Add it to your home screen if
+you want it a tap away.
+
+One thing to watch: that address is handed out by your router over DHCP, so it can change when the
+PC reboots — the agent window always shows the current one. Reserving a fixed address for the PC in
+your router makes a home-screen shortcut permanent.
+
+**The Expo client is optional and behind.** [`app/`](app) is a second, native client kept for the
+extras a browser cannot do (vibration, push while closed). It has **not** been updated for role
+presets, backup picks or runes, and its auto-pick / auto-ban controls write settings the agent no
+longer reads. It is scaffolded on **Expo SDK 57** with dependencies resolved:
 
 ```bash
 cd app
@@ -100,15 +111,6 @@ npx expo start
 
 Scan the QR code with **Expo Go** on your phone (same Wi-Fi as the PC), then enter the IP, port and
 pairing code from the agent window.
-
-To preview the UI in a browser without a phone:
-
-```bash
-npx expo start --web    # then open http://localhost:8081
-```
-
-Most of it works on web — the connect flow, live state, automation toggles. Vibration and push
-notifications are no-ops there.
 
 ### 3. Push notifications (optional but recommended)
 
@@ -139,20 +141,29 @@ agent/src/
   lcu/
     credentials.ts      Finds the client's port + auth token
     client.ts           HTTPS + WAMP WebSocket wrapper
-    actions.ts          accept / pick / ban / spells / skin, session parsing
+    actions.ts          accept / pick / ban / spells / skin, roles, session parsing
+    runes.ts            Perk catalog, the client's recommendations, writing a page
     gamedata.ts         Champion, spell and skin catalogs (served by the client itself)
 
-app/
+web/src/                The remote your phone actually loads, served by the agent
+  App.tsx               Tab shell, ready-check overlay, toasts
+  lib/api.ts            Typed client for the agent
+  hooks/useAgent.ts     Live WebSocket state with reconnect
+  hooks/useAutomation.ts  Settings that apply on tap and reconcile with the agent
+  components/panels/    Status, ChampSelect, Automation
+  components/           Champion grid and slots, role picker, rune editor, skin carousel
+
+app/                    Second, Expo-based client — see the note under Setup; not at parity
   App.tsx               Tab shell, ready-check overlay, toasts
   src/api.ts            Typed client for the agent
   src/useAgent.ts       Live WebSocket state with reconnect
   src/screens/          Connect, Status, ChampSelect, Automation
-  src/components/       Champion grid, skin carousel, spell picker, UI primitives
 
 desktop/src/            Electron shell around agent/src — the app to actually install, see above
   main/index.ts          Starts the same Session + startServer as agent/'s dev entry, plus tray/window/IPC
   preload/index.ts        contextBridge API the renderer calls into
   renderer/src/          Pairing code, status, and activity feed UI (styled to match web/)
+desktop/build/          electron-builder inputs: the app icon and the NSIS install script
 ```
 
 ## How the interesting parts work
@@ -160,9 +171,9 @@ desktop/src/            Electron shell around agent/src — the app to actually 
 **Architecture.**
 
 ```
-Phone (Expo app)  ──HTTP + WebSocket──▶  Agent (Node, on your PC)  ──▶  League Client API
-        ▲                                        │
-        └────────── Expo push ───────────────────┘   "Queue popped!"
+Phone (browser)  ──HTTP + WebSocket──▶  Agent (Node, on your PC)  ──▶  League Client API
+       ▲                                        │
+       └────────── Expo push ───────────────────┘   "Queue popped!"
 ```
 
 The agent talks to the **LCU** (League Client Update) API — the same local HTTPS API the client's
@@ -184,17 +195,31 @@ player's action. `findMyAction` flattens them and finds the one where `actorCell
 champion, and the agent resolves the current action itself, so a stale phone can't lock into the
 wrong slot.
 
-**Which champion to pick.** The agent reads `assignedPosition` off its own slot in `myTeam`, looks
-up that role's list, and takes the first entry the client still reports in
-`pickable-champion-ids` and that nobody has banned or locked. Autofill needs no special case: the
-role the client assigned *is* the lookup key, so being handed support instead of mid simply reads
-a different list. Bans work the same way against `bannable-champion-ids`, minus anything a
-teammate has declared via `championPickIntent`.
+**Which champion to pick.** The agent reads `assignedPosition` off its own slot in `myTeam` and
+takes the first entry from that role's list that nobody has banned or locked. Autofill needs no
+special case: the role the client assigned *is* the lookup key, so being handed support instead of
+mid simply reads a different list. Bans work the same way, minus anything a teammate has declared
+via `championPickIntent`.
 
-**Declaring a pick.** During the `PLANNING` phase there is no action in progress to patch, so
-intent goes through `PATCH /lol-champ-select/v1/session/my-selection` with just a `championId`.
-That is what populates `championPickIntent` on your team slot and puts the champion on everyone's
-screen; it commits nothing.
+**Why the client's own availability lists are only a hint.** `pickable-champion-ids` and
+`bannable-champion-ids` look authoritative and are not. For roughly the first half-minute after
+the ban phase opens they come back *populated but incomplete*, omitting champions the client will
+accept perfectly well seconds later. Treating them as a veto meant sitting out the first ban of
+every game. So the agent prefers a champion they advertise, and otherwise offers its first untaken
+choice and lets the client be the one to refuse. A refusal is retried a few times rather than
+being final — the client also rejects actions for a beat around phase boundaries — and only a call
+it accepts closes the turn out.
+
+**Declaring a pick.** During `PLANNING` the champion you intend to play is declared by patching
+your *pick action* with `completed: false` — the same call a hover uses, which is exactly why it
+shows up for the team. It commits nothing.
+
+The obvious-looking alternative does not work: `PATCH /lol-champ-select/v1/session/my-selection`
+with a `championId` is accepted and returns success, but it only updates your local selection
+record and never tells the lobby, so every slot stays empty and nothing appears on screen. A
+silent no-op that reports success is worse than an error, so it is worth stating plainly. Note
+also that the pick action is *not* the one in progress during planning — the first ban is — so it
+travels in the session state separately from `myAction`.
 
 **Runes.** `/lol-perks/v1/styles` gives the tree structure (a keystone slot, three minor slots and
 three stat slots per tree) and `/lol-perks/v1/perks` the individual runes, which is everything the
@@ -226,7 +251,7 @@ enforcement action, but Riot has never formally blessed them. Use it knowing tha
 Tested end to end on macOS against a **running agent with no League client**, which exercises
 everything except the LCU calls themselves:
 
-- Both halves typecheck clean (agent on TS 5.7, app on TS 6 / React 19 / RN 0.86)
+- Every package typechecks clean (agent on TS 5.7, web and desktop on TS 6 / React 19)
 - Agent discovers credentials, serves the pairing banner, and reconnects while waiting for League
 - REST auth gate: correct code passes, wrong code gets `401`
 - WebSocket: pushes state on connect, rejects a bad pairing code at the upgrade
@@ -252,15 +277,30 @@ Since verified on Windows against a **live League client**, in a real ranked lob
 - With one slot free, applying runes creates the page with the exact styles and perks requested and
   makes it current; applying a second champion's runes **reuses the same slot** rather than
   consuming another, and both times the player's own pages came back byte-identical
-
+- Across several real drafts: the assigned role's list drives the pick (Twitch on bot, Viego on
+  jungle), that role's spells override the global preset, the ban lands, the declared champion
+  shows during planning, runes apply on lock, and panic lock commits a hover before the timer runs
+  out
 - `npm run package:installer` builds clean, producing a signed-by-nobody NSIS installer that
   offers the firewall rule and the start-with-Windows shortcut, and removes both on uninstall
 
-**Not yet tested with a live client:** pick, skin and bench swap. The installer has been built but
-not *run* — its own pages and the firewall rule it adds need an elevated install to exercise.
+Three bugs only real games surfaced, all since fixed and covered by regression tests that fail
+against the code that had them:
+
+- The ban was evaluated during `PLANNING`, found nothing legal that early, and burned the action's
+  one-shot guard — so the real ban turn was skipped silently a minute later
+- The ban then sat out its first proper attempt too, because the client's `bannable-champion-ids`
+  omits champions it will accept moments later
+- Declaring a pick wrote to `my-selection`, which reports success and shows nothing
+
+**Not yet tested with a live client:** bench swap. The installer has been built but not *run* — its
+own pages and the firewall rule it adds need an elevated install to exercise.
 
 ## Ideas for later
 
-- QR pairing (`expo-camera`) instead of typing the IP and code
+- A QR code in the agent window encoding the address and pairing code, so the phone scans instead
+  of typing
+- A web manifest, so adding the remote to the home screen gives a real icon and a fullscreen launch
+  rather than a bookmark
 - Bring [`app/`](app) up to parity with `web/` (roles, backup picks, runes)
 - Cloud relay so it works off your home Wi-Fi (a small WebSocket server both sides dial out to)
