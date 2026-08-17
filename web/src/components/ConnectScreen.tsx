@@ -1,27 +1,75 @@
-import { useState } from "react";
-import { motion } from "framer-motion";
-import { Wifi, KeyRound, ArrowRight, Loader2 } from "lucide-react";
-import { ping, verify, type Connection } from "../lib/api";
+import { lazy, Suspense, useEffect, useState } from "react";
+import { AnimatePresence, motion } from "framer-motion";
+import { Wifi, KeyRound, ArrowRight, Loader2, QrCode } from "lucide-react";
+import { ping, verify, agentServedThisPage, pairingLinkFromLocation, type Connection } from "../lib/api";
 import { Button } from "./ui/Button";
 import leagueIcon from "../assets/league-icon.png";
 
-// Vite's own dev/preview servers (npm run dev / vite preview) — if the page
-// loaded from one of those, it's a standalone checkout, not the agent
-// serving its own build, so there's nothing sensible to prefill from the URL.
-const STANDALONE_DEV_PORTS = new Set(["5173", "4173"]);
+// The scanner drags in a QR decoder, and most people never open it — the
+// browser route is a camera app following the link, and the app route is one
+// tap that can afford to fetch this. Keeping it out of the initial bundle
+// matters when the phone is pulling that bundle over the LAN.
+const QrScanner = lazy(() =>
+  import("./QrScanner").then((module) => ({ default: module.QrScanner })),
+);
 
 export function ConnectScreen({ onConnected }: { onConnected: (connection: Connection) => void }) {
-  const selfServed = !STANDALONE_DEV_PORTS.has(window.location.port);
+  const selfServed = agentServedThisPage();
+  // A camera app that scanned the agent's QR opens this page at the pairing
+  // link, so the address bar already holds every answer the form asks for.
+  const [scanned] = useState(pairingLinkFromLocation);
+
   // When the agent serves this page itself, the address bar already has the
   // answer — no reason to make anyone type it.
   const [host, setHost] = useState(selfServed ? window.location.hostname : "");
   const [port, setPort] = useState(selfServed ? window.location.port || "8777" : "8777");
-  const [code, setCode] = useState("");
+  const [code, setCode] = useState(scanned?.code ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [autoConnecting, setAutoConnecting] = useState(Boolean(scanned));
+  const [scannerOpen, setScannerOpen] = useState(false);
 
-  const submit = async () => {
+  // No point offering a scanner the platform will not let us open. It exists
+  // for the installed app, which runs on a localhost origin; loaded from the
+  // agent over plain HTTP the camera API is not there at all, and that route
+  // does not need it — the phone's own camera app opens the link.
+  const cameraAvailable = Boolean(navigator.mediaDevices?.getUserMedia);
+
+  /**
+   * The one way in, whether the details were typed, scanned, or carried by the
+   * link this page was opened with. Ping first so "the agent isn't running"
+   * and "wrong code" stay distinguishable — they need different fixes.
+   */
+  const connectTo = async (connection: Connection): Promise<void> => {
     setError(null);
+    setBusy(true);
+    try {
+      if (!(await ping(connection.host, connection.port))) {
+        setError("No agent found at that address. Check it's running and you're on the same Wi-Fi.");
+        return;
+      }
+      if (!(await verify(connection))) {
+        setError("Wrong pairing code.");
+        return;
+      }
+      onConnected(connection);
+    } finally {
+      setBusy(false);
+      // Whatever happened, the automatic attempt is over: either we're gone,
+      // or the form needs to come back so it can be fixed by hand.
+      setAutoConnecting(false);
+    }
+  };
+
+  // A scanned link should just connect, with the form appearing only if it
+  // didn't work — and then with the code already filled in.
+  useEffect(() => {
+    if (scanned) void connectTo(scanned);
+    // Runs once, for the link this page was opened with.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const submit = () => {
     const trimmedHost = host.trim();
     const trimmedPort = Number(port);
     const trimmedCode = code.trim();
@@ -30,25 +78,28 @@ export function ConnectScreen({ onConnected }: { onConnected: (connection: Conne
       setError("Enter the IP, port, and 6-digit pairing code from the agent window.");
       return;
     }
-
-    setBusy(true);
-    try {
-      const found = await ping(trimmedHost, trimmedPort);
-      if (!found) {
-        setError("No agent found at that address. Check it's running and you're on the same Wi-Fi.");
-        return;
-      }
-      const connection: Connection = { host: trimmedHost, port: trimmedPort, code: trimmedCode };
-      const ok = await verify(connection);
-      if (!ok) {
-        setError("Wrong pairing code.");
-        return;
-      }
-      onConnected(connection);
-    } finally {
-      setBusy(false);
-    }
+    void connectTo({ host: trimmedHost, port: trimmedPort, code: trimmedCode });
   };
+
+  const onScanned = (connection: Connection) => {
+    setScannerOpen(false);
+    // Mirror the scan into the form, so a failure leaves something to correct
+    // rather than an empty box.
+    setHost(connection.host);
+    setPort(String(connection.port));
+    setCode(connection.code);
+    void connectTo(connection);
+  };
+
+  if (autoConnecting) {
+    return (
+      <div className="relative min-h-svh flex flex-col items-center justify-center gap-4 px-6 overflow-hidden">
+        <BackgroundGlow />
+        <Loader2 className="relative z-10 h-7 w-7 text-hextech animate-spin" />
+        <p className="relative z-10 text-ink-muted text-sm">Pairing with your PC…</p>
+      </div>
+    );
+  }
 
   return (
     <div className="relative min-h-svh flex items-center justify-center px-6 py-12 overflow-hidden">
@@ -71,6 +122,23 @@ export function ConnectScreen({ onConnected }: { onConnected: (connection: Conne
           <h1 className="text-2xl font-extrabold tracking-[0.08em] uppercase text-ink text-glow-hextech">LoL Remote</h1>
           <p className="text-ink-dim text-sm mt-2 text-center">Connect to the agent running on your gaming PC.</p>
         </div>
+
+        {cameraAvailable && (
+          <div className="mb-5">
+            <Button variant="hextech" size="lg" className="w-full" disabled={busy} onClick={() => setScannerOpen(true)}>
+              <QrCode className="h-4 w-4" />
+              Scan the QR code
+            </Button>
+            <p className="text-ink-dim/70 text-xs text-center mt-2">
+              It's in the agent window on your PC.
+            </p>
+            <div className="flex items-center gap-3 mt-5">
+              <span className="h-px flex-1 bg-hairline" />
+              <span className="text-ink-dim/70 text-[11px] uppercase tracking-wider">or type it in</span>
+              <span className="h-px flex-1 bg-hairline" />
+            </div>
+          </div>
+        )}
 
         <div className="glass rounded-3xl p-6 space-y-4">
           <Field icon={<Wifi className="h-4 w-4" />} label="PC address">
@@ -109,16 +177,30 @@ export function ConnectScreen({ onConnected }: { onConnected: (connection: Conne
             </motion.p>
           )}
 
-          <Button variant="hextech" size="lg" className="w-full" disabled={busy} onClick={() => void submit()}>
+          <Button variant={cameraAvailable ? "ghost" : "hextech"} size="lg" className="w-full" disabled={busy} onClick={submit}>
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
             {busy ? "Connecting…" : "Connect"}
           </Button>
         </div>
 
         <p className="text-ink-dim/70 text-xs text-center mt-6">
-          Run <code className="text-ink-muted">npm run dev</code> in <code className="text-ink-muted">agent/</code> on your PC to get these values.
+          Open the LoL Remote agent on your PC to get these — it shows a QR code, an address and a code.
         </p>
       </motion.div>
+
+      <AnimatePresence>
+        {scannerOpen && (
+          <Suspense
+            fallback={
+              <div className="fixed inset-0 z-50 bg-black flex items-center justify-center">
+                <Loader2 className="h-6 w-6 text-hextech animate-spin" />
+              </div>
+            }
+          >
+            <QrScanner onResult={onScanned} onClose={() => setScannerOpen(false)} />
+          </Suspense>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

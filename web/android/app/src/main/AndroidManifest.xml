@@ -39,4 +39,15 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Scanning the agent's pairing QR from the connect screen. Capacitor's
+         WebChromeClient asks for this at the moment the camera is opened, so
+         nothing is requested until someone taps Scan. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- Declared so Play-style installs don't exclude phones without an
+         autofocus camera: scanning is one convenience on the connect screen,
+         and typing the address in still works without any camera at all. -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
 </manifest>

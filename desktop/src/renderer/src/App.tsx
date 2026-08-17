@@ -38,32 +38,43 @@ export default function App() {
   }
 
   return (
-    <div className="relative z-10 h-full flex flex-col gap-4 p-5">
-      <header className="flex items-center gap-2.5 shrink-0">
-        <span className="h-2 w-2 rounded-full bg-hextech shadow-[0_0_10px_rgba(10,200,185,0.8)] animate-pulse-glow" />
-        <h1 className="font-display text-sm font-bold uppercase tracking-[0.3em] text-ink-muted">
-          LoL Remote
-        </h1>
-      </header>
+    // Two layers on purpose. The outer one scrolls; the inner one is at least a
+    // full window tall so the activity log can still stretch into spare space
+    // when there is any. Shrink the window past what the cards need and the
+    // page scrolls instead of squashing them into their own overflow-hidden
+    // corners, which is what a single h-full flex column did.
+    <div className="relative z-10 h-full overflow-y-auto no-scrollbar">
+      <div className="min-h-full flex flex-col gap-4 p-5">
+        <header className="flex items-center gap-2.5 shrink-0">
+          <span className="h-2 w-2 rounded-full bg-hextech shadow-[0_0_10px_rgba(10,200,185,0.8)] animate-pulse-glow" />
+          <h1 className="font-display text-sm font-bold uppercase tracking-[0.3em] text-ink-muted">
+            LoL Remote
+          </h1>
+        </header>
 
-      <PairingCard
-        pairingCode={pairingCode}
-        addresses={addresses}
-        port={port}
-        servingWebApp={servingWebApp}
-        onRegenerate={async () => {
-          const next = await window.api.regenerateCode();
-          setPairingCode(next);
-        }}
-      />
+        <div className="shrink-0">
+          <PairingCard
+            pairingCode={pairingCode}
+            addresses={addresses}
+            port={port}
+            servingWebApp={servingWebApp}
+            onRegenerate={async () => {
+              const next = await window.api.regenerateCode();
+              setPairingCode(next);
+            }}
+          />
+        </div>
 
-      <StatusCard state={state} connectedPhones={connectedPhones} />
+        <div className="shrink-0">
+          <StatusCard state={state} connectedPhones={connectedPhones} />
+        </div>
 
-      <ActivityLog log={state?.log ?? []} />
+        <ActivityLog log={state?.log ?? []} />
 
-      <footer className="text-center text-[11px] text-ink-dim shrink-0">
-        Keep this open while you play — minimizes to the tray.
-      </footer>
+        <footer className="text-center text-[11px] text-ink-dim shrink-0">
+          Keep this open while you play — minimizes to the tray.
+        </footer>
+      </div>
     </div>
   );
 }

@@ -4,7 +4,9 @@ import type { AgentState } from "../../../../../agent/src/types";
 
 export function ActivityLog({ log }: { log: AgentState["log"] }) {
   return (
-    <Card className="flex-1 min-h-0 flex flex-col">
+    // Takes the slack in a tall window, but never collapses to a sliver in a
+    // short one — below this it stops shrinking and the page scrolls instead.
+    <Card className="flex-1 min-h-[150px] flex flex-col">
       <SectionTitle accent="hextech">Activity</SectionTitle>
       {log.length === 0 ? (
         <p className="text-ink-dim text-sm">Nothing yet.</p>

@@ -1,8 +1,9 @@
+import QRCode from "qrcode";
 import { Session } from "./session.js";
 import { startServer } from "./server.js";
-import { getPairingCode, localAddresses, SERVER_PORT } from "./config.js";
+import { getPairingCode, localAddresses, pairingUrl, SERVER_PORT } from "./config.js";
 
-function banner(): void {
+async function banner(): Promise<void> {
   const code = getPairingCode();
   const addresses = localAddresses();
 
@@ -18,13 +19,25 @@ function banner(): void {
     }
   }
   console.log("");
-  console.log("  Enter those in the phone app, on the same Wi-Fi.");
-  console.log("  Keep this window open while you play.");
+
+  // A terminal QR is only worth drawing for one address, and with several
+  // interfaces (Ethernet plus Wi-Fi, or a VM's virtual adapter) there is no way
+  // to tell from here which one the phone can reach. The first is the usual
+  // answer; the desktop app is where you get to pick.
+  const [first] = addresses;
+  if (first) {
+    const url = pairingUrl(first);
+    console.log(await QRCode.toString(url, { type: "terminal", small: true }));
+    console.log(`  Scan that, or open ${url}`);
+    console.log("");
+  }
+
+  console.log("  Same Wi-Fi as this PC. Keep this window open while you play.");
   console.log("");
 }
 
 async function main(): Promise<void> {
-  banner();
+  await banner();
 
   const session = new Session();
   await startServer(session);
