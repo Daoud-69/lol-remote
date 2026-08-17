@@ -253,7 +253,11 @@ Since verified on Windows against a **live League client**, in a real ranked lob
   makes it current; applying a second champion's runes **reuses the same slot** rather than
   consuming another, and both times the player's own pages came back byte-identical
 
-**Not yet tested with a live client:** pick, skin and bench swap.
+- `npm run package:installer` builds clean, producing a signed-by-nobody NSIS installer that
+  offers the firewall rule and the start-with-Windows shortcut, and removes both on uninstall
+
+**Not yet tested with a live client:** pick, skin and bench swap. The installer has been built but
+not *run* — its own pages and the firewall rule it adds need an elevated install to exercise.
 
 ## Ideas for later
 
