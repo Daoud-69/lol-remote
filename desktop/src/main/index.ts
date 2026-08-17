@@ -11,7 +11,12 @@ import {
 } from "../../../agent/src/config.js";
 import type { AgentState } from "../../../agent/src/types.js";
 
-const iconPath = join(__dirname, "../../build/icon.ico");
+// Packaged, __dirname is inside app.asar and build/ is not in there — the icon
+// ships as an extraResource instead (see electron-builder.yml). Running from
+// source it is just the sibling file.
+const iconPath = app.isPackaged
+  ? join(process.resourcesPath, "icon.ico")
+  : join(__dirname, "../../build/icon.ico");
 
 // Packaged builds get web/dist copied in as an extraResource (see
 // electron-builder.yml); running from source, it's just the sibling project.
@@ -82,7 +87,15 @@ function createWindow(): void {
 }
 
 function createTray(): void {
-  const image = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 });
+  // createFromPath returns an empty image for a missing file rather than
+  // throwing, and Tray accepts it — you get a working tooltip attached to
+  // nothing visible. Say so instead of leaving it to be noticed in the tray.
+  const loaded = nativeImage.createFromPath(iconPath);
+  if (loaded.isEmpty()) {
+    // eslint-disable-next-line no-console
+    console.error(`[agent] Tray icon missing or unreadable at ${iconPath}`);
+  }
+  const image = loaded.isEmpty() ? loaded : loaded.resize({ width: 16, height: 16 });
   tray = new Tray(image);
   tray.setToolTip("LoL Remote Agent");
   tray.setContextMenu(

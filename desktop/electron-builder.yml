@@ -9,6 +9,11 @@ files:
 extraResources:
   - from: ../web/dist
     to: web-dist
+  # The tray builds its icon from a file at runtime, so the icon has to exist
+  # inside the installed app — `files` only packages out/, and win.icon below
+  # only stamps the executable. Without this the tray icon is silently blank.
+  - from: build/icon.ico
+    to: icon.ico
 win:
   target: nsis
   icon: build/icon.ico
