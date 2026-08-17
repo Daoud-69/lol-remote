@@ -142,6 +142,19 @@ export function addPushToken(token: string): void {
   write(next);
 }
 
+/**
+ * The one string a QR code carries: where the agent is, and the pairing code,
+ * in a form a phone camera will act on by itself.
+ *
+ * It is deliberately the same URL the remote is already served from, with the
+ * code as a query parameter — so a camera app opens the actual remote and it
+ * pairs itself, while the in-app scanner parses the same string back into a
+ * host, port and code. One payload, both routes.
+ */
+export function pairingUrl(address: string): string {
+  return `http://${address}:${SERVER_PORT}/?code=${getPairingCode()}`;
+}
+
 /** Every non-internal IPv4 address, so the agent can print where to connect. */
 export function localAddresses(): string[] {
   return Object.values(os.networkInterfaces())

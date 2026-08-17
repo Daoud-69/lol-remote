@@ -21,6 +21,59 @@ export function baseUrl(connection: Connection): string {
   return `http://${connection.host}:${connection.port}`;
 }
 
+/** The agent's default, used when a pairing link leaves the port implicit. */
+const DEFAULT_PORT = 8777;
+
+/**
+ * Reads a pairing link — `http://192.168.1.20:8777/?code=123456` — into a
+ * connection.
+ *
+ * This is the other half of `pairingUrl()` in the agent, and it has two
+ * callers: the QR scanner in the app, and this page's own address bar when a
+ * phone camera opened the link directly. Deliberately strict, since anything
+ * it accepts gets dialled and handed a pairing code.
+ */
+export function parsePairingUrl(text: string): Connection | null {
+  let url: URL;
+  try {
+    url = new URL(text.trim());
+  } catch {
+    return null;
+  }
+
+  if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+  if (!url.hostname) return null;
+
+  const code = url.searchParams.get("code") ?? "";
+  if (!/^\d{6}$/.test(code)) return null;
+
+  const port = url.port ? Number(url.port) : DEFAULT_PORT;
+  if (!Number.isInteger(port) || port <= 0 || port > 65535) return null;
+
+  return { host: url.hostname, port, code };
+}
+
+// Vite's own dev/preview servers (npm run dev / vite preview) — if the page
+// loaded from one of those, it's a standalone checkout, not the agent serving
+// its own build, so its host and port are Vite's rather than the agent's.
+const STANDALONE_DEV_PORTS = new Set(["5173", "4173"]);
+
+export function agentServedThisPage(): boolean {
+  return !STANDALONE_DEV_PORTS.has(window.location.port);
+}
+
+/**
+ * The pairing link this page was opened with, if a phone camera scanned the
+ * agent's QR to get here. Null when the page was reached any other way.
+ */
+export function pairingLinkFromLocation(): Connection | null {
+  return agentServedThisPage() ? parsePairingUrl(window.location.href) : null;
+}
+
+export function sameConnection(a: Connection | null, b: Connection | null): boolean {
+  return a?.host === b?.host && a?.port === b?.port && a?.code === b?.code;
+}
+
 export function socketUrl(connection: Connection): string {
   return `ws://${connection.host}:${connection.port}/ws?code=${encodeURIComponent(connection.code)}`;
 }

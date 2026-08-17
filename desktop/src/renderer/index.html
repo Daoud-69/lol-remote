@@ -2,7 +2,10 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com" />
+    <!-- img-src needs data: for the pairing QR, which the main process renders
+         to a data URL and hands over IPC. Without it the QR silently falls back
+         to a broken-image icon: default-src 'self' does not cover data:. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>LoL Remote Agent</title>
   </head>

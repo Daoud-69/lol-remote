@@ -11,9 +11,18 @@ export interface AgentInfo {
   servingWebApp: boolean;
 }
 
+/** A pairing link and a QR image of it, for one of the PC's addresses. */
+export interface PairingQr {
+  url: string;
+  /** PNG data URL, ready to drop straight into an <img>. */
+  dataUrl: string;
+}
+
 const api = {
   getInfo: (): Promise<AgentInfo> => ipcRenderer.invoke("agent:getInfo"),
   regenerateCode: (): Promise<string> => ipcRenderer.invoke("agent:regenerateCode"),
+  pairingQr: (address: string): Promise<PairingQr> =>
+    ipcRenderer.invoke("agent:pairingQr", address),
   copy: (text: string): Promise<void> => ipcRenderer.invoke("app:copy", text),
   onState: (callback: (push: AgentPush) => void): (() => void) => {
     const listener = (_event: Electron.IpcRendererEvent, push: AgentPush) => callback(push);

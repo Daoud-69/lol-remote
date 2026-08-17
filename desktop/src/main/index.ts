@@ -1,12 +1,14 @@
-import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, clipboard, shell } from "electron";
+import { app, BrowserWindow, Tray, Menu, nativeImage, ipcMain, clipboard, shell, screen } from "electron";
 import { electronApp, is } from "@electron-toolkit/utils";
 import { join } from "node:path";
+import QRCode from "qrcode";
 import { Session } from "../../../agent/src/session.js";
 import { startServer, type ServerHandle } from "../../../agent/src/server.js";
 import {
   getPairingCode,
   regeneratePairingCode,
   localAddresses,
+  pairingUrl,
   SERVER_PORT,
 } from "../../../agent/src/config.js";
 import type { AgentState } from "../../../agent/src/types.js";
@@ -51,11 +53,19 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 function createWindow(): void {
+  // The cards need about 860px to lay out in full, and the window scrolls when
+  // they don't get it. Open tall enough that they do — but never taller than
+  // the screen, or a 768px laptop gets a window running off the bottom.
+  const { workAreaSize } = screen.getPrimaryDisplay();
+
   mainWindow = new BrowserWindow({
     width: 460,
-    height: 720,
+    height: Math.min(900, workAreaSize.height - 80),
     minWidth: 400,
-    minHeight: 560,
+    // Was 560, which is roughly what the cards need laid out in full. Now that
+    // the window scrolls rather than clipping, it can go smaller than its
+    // content and still be usable — handy parked in a corner while you play.
+    minHeight: 420,
     show: false,
     autoHideMenuBar: true,
     backgroundColor: "#09090b",
@@ -140,6 +150,24 @@ function registerIpc(session: Session): void {
 
   ipcMain.handle("agent:regenerateCode", () => regeneratePairingCode());
   ipcMain.handle("app:copy", (_event, text: string) => clipboard.writeText(text));
+
+  /**
+   * The pairing link for one address, plus a QR of it to put on screen.
+   *
+   * Built here rather than in the renderer so the URL has exactly one
+   * definition (agent/src/config.ts), shared with the terminal banner.
+   * Rendered dark-on-white regardless of the app's own dark theme — an
+   * inverted QR is a coin flip on whether a given phone camera reads it.
+   */
+  ipcMain.handle("agent:pairingQr", async (_event, address: string) => {
+    const url = pairingUrl(address);
+    const dataUrl = await QRCode.toDataURL(url, {
+      width: 320,
+      margin: 1,
+      color: { dark: "#0b0d12ff", light: "#ffffffff" },
+    });
+    return { url, dataUrl };
+  });
 }
 
 export interface AgentPush {

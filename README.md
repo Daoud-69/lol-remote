@@ -10,9 +10,10 @@ champion, and choose your skin, without touching the keyboard.
 | **[⬇ Windows agent](https://github.com/Daoud-69/lol-remote/releases/latest/download/LoLRemoteAgent-Setup.exe)** | Runs on your gaming PC. This is the half that talks to League. |
 | **[⬇ Android app](https://github.com/Daoud-69/lol-remote/releases/latest/download/LoLRemote.apk)** | The remote itself. Optional — see below. |
 
-Install the agent, open it, and it shows you an address and a six-digit pairing code. Then either
-open that address in your phone's browser, or install the Android app and type the address into it.
-Both are the same remote; the app just gets its own icon and loses the address bar.
+Install the agent and open it. It shows a QR code — point your phone's camera at it and the remote
+opens already paired, with nothing to type. The address and six-digit code are there beside it for
+anyone who'd rather type them, or who's using the Android app (which scans the same QR from its own
+connect screen). Both are the same remote; the app just gets its own icon and loses the address bar.
 
 **iPhone:** open the address in Safari and use Share → *Add to Home Screen*. It launches fullscreen
 with a proper icon, which is as close to an installed app as iOS allows without a paid Apple
@@ -55,10 +56,15 @@ in the client once, and it will reuse that slot from then on.
 
 ### 1. Agent (on the gaming PC)
 
-**[`desktop/`](desktop) is the app to install** — a proper Windows program with its own window: the
-pairing code and address front and center, live League-client status, a connected-phone indicator,
-and an activity feed, styled to match the [`web/`](web) remote control. Minimizes to the tray
-instead of quitting, so closing the window doesn't drop your phone's connection.
+**[`desktop/`](desktop) is the app to install** — a proper Windows program with its own window: a
+pairing QR code with the address and pairing code beside it, live League-client status, a
+connected-phone indicator, and an activity feed, styled to match the [`web/`](web) remote control.
+Minimizes to the tray instead of quitting, so closing the window doesn't drop your phone's
+connection.
+
+If the PC has more than one network address — Ethernet and Wi-Fi, or a VM's virtual adapter — they
+are all listed and you can tap one to point the QR at it. Only you know which network the phone is
+actually on.
 
 It also serves the [`web/`](web) remote control itself, from the same address it already shows —
 open that link in your phone's browser and you get the actual app UI, no separate server to start,
@@ -101,14 +107,18 @@ app each time, but it's a developer workflow, not something to hand to a friend.
 
 ### 2. Phone
 
-Whichever of these you pick, it is the same remote and the same three details: same Wi-Fi as the
-PC, the address the agent window shows, and the six-digit pairing code beside it. The connection is
-remembered, so you only type it once.
+Whichever of these you pick, it is the same remote and the same requirement: the phone on the same
+Wi-Fi as the PC. The connection is remembered, so pairing happens once.
 
-**Nothing at all.** Open the address in your phone's browser. Works on anything.
+**Nothing at all.** Point your phone's camera at the QR code in the agent window and open the
+notification it offers. That is the whole setup — the link carries the address and the pairing code,
+so the remote opens already connected. Typing the address into a browser by hand still works, and
+then it asks for the code.
 
-**Android app.** Install the [APK](#download) and type the address in. Own icon, no address bar. It
-is [`web/`](web) wrapped by Capacitor, so it is the same UI with the same features — built with:
+**Android app.** Install the [APK](#download) and tap **Scan the QR code** on its connect screen.
+Own icon, no address bar. A camera app can't hand a link to an installed app, so the app does its
+own scanning — same QR, same result. It is [`web/`](web) wrapped by Capacitor, so it is the same UI
+with the same features — built with:
 
 ```bash
 cd web
@@ -120,7 +130,9 @@ The APK is a *debug* build. It is signed with Android's debug key, which is fine
 onto your own phone but is why Android warns about the source; shipping through a store would need
 a release keystore.
 
-**iPhone.** Safari → Share → *Add to Home Screen*. Apple honours the `apple-mobile-web-app` tags
+**iPhone.** Scan the QR with the camera to open it in Safari, then Share → *Add to Home Screen*.
+The pairing code is dropped from the address bar once it has been used, so the shortcut you save is
+the clean URL and the code is not left sitting in your history. Apple honours the `apple-mobile-web-app` tags
 over plain HTTP, so it launches fullscreen with a real icon. A true native iOS build needs macOS
 and an Apple signing identity; the Capacitor project is scaffolded in [`web/ios`](web/ios) for
 whenever that exists, but it has never been built.
@@ -159,12 +171,15 @@ automatically on connect.
   ```
   and an EAS project id filled into `extra.eas.projectId` in `app.json`.
 
+Note this is the [`app/`](app) Expo client's path only — the Android app and the browser get the
+vibration and the full-screen alert, not a push.
+
 ## Project layout
 
 ```
 agent/src/
-  index.ts              Entry point, prints the pairing banner
-  config.ts             Pairing code, saved automation settings, push tokens (~/.lol-remote)
+  index.ts              Entry point, prints the pairing banner and a terminal QR
+  config.ts             Pairing code and link, saved automation settings, push tokens (~/.lol-remote)
   session.ts            Owns the client connection, live state, automation rules
   server.ts             REST + WebSocket the phone talks to
   push.ts               Expo push sender
@@ -183,6 +198,7 @@ web/src/                The remote your phone actually loads, served by the agen
   hooks/useAutomation.ts  Settings that apply on tap and reconcile with the agent
   components/panels/    Status, ChampSelect, Automation
   components/           Champion grid and slots, role picker, rune editor, skin carousel
+  components/QrScanner.tsx  Camera viewfinder for the installed app, lazy-loaded
 web/android/            Capacitor shell — the installable Android app, same UI
 web/ios/                Capacitor shell for iOS; scaffolded, never built (needs macOS)
 web/public/             Icons and the web manifest that make it installable to a home screen
@@ -213,6 +229,26 @@ Phone (browser)  ──HTTP + WebSocket──▶  Agent (Node, on your PC)  ─�
 The agent talks to the **LCU** (League Client Update) API — the same local HTTPS API the client's
 own UI uses. It reads the port and auth token from the running `LeagueClientUx.exe` process, so
 there's nothing to configure.
+
+**Pairing by QR.** The code encodes one string — `http://<address>:8777/?code=123456` — and that one
+string covers both routes, because it is the URL the remote is *already* served from with the
+pairing code attached. A phone camera treats it as an ordinary link and opens the remote, which
+reads the code out of its own address bar and connects before drawing anything. The installed app
+can't be reached by a link, so it scans the same code itself (`getUserMedia` plus `jsqr`) and parses
+that string back into a host, port and code. Same payload, one definition of it in
+`agent/src/config.ts`, and no second format to keep in sync.
+
+Two details worth knowing. The QR is drawn dark-on-white even though the agent window is nearly
+black — an inverted code is a coin flip on whether a given phone camera reads it, and one that only
+sometimes scans is worse than none. And the scanner only exists in the app: `getUserMedia` is
+exposed only on secure origins, which Capacitor's `http://localhost` is and this same page loaded
+from the agent over plain HTTP is not, so the browser build hides the button rather than offering a
+camera that cannot open. That costs nothing, because the browser route never needed it.
+
+Once a link has been used the code is stripped from the address bar with `replaceState`, so it does
+not linger in history or in a saved home-screen shortcut. A link in the address bar also outranks a
+remembered connection — re-scanning after regenerating the code is how you'd fix a phone stuck on
+the old one, and silently restoring the stale connection would defeat that.
 
 **Finding the client.** `credentials.ts` queries `Win32_Process` for `LeagueClientUx.exe` and pulls
 `--app-port` and `--remoting-auth-token` off its command line, falling back to the `lockfile` in the
@@ -332,14 +368,26 @@ against the code that had them:
   omits champions it will accept moments later
 - Declaring a pick wrote to `my-selection`, which reports success and shows nothing
 
-**Not yet tested with a live client:** bench swap. The installer has been built but not *run* — its
-own pages and the firewall rule it adds need an elevated install to exercise. The iOS shell has
-never been compiled at all.
+QR pairing, verified without a phone in hand:
+
+- The payload round-trips between the two libraries that have to agree on it — encoded with
+  `qrcode` exactly as the agent does, rasterised, and decoded with the same `jsqr` the app's scanner
+  runs, across several address and port shapes
+- The parser refuses what it should: a five-digit or non-numeric code, a bare `host:port`, someone
+  else's QR (a Wi-Fi join code), and an arbitrary `https://` URL
+- The dev agent prints a scannable terminal QR and the matching link above its pairing banner
+- Agent, web and desktop all typecheck and build clean with it in; lazy-loading the scanner keeps
+  the decoder out of the initial bundle, which came down from 483 kB to 386 kB
+
+**Not yet tested with a live client:** bench swap. **Not yet tested on a real phone:** the QR
+itself — neither a camera app scanning the desktop window nor the in-app scanner has been pointed at
+a physical screen, and the app's camera path additionally depends on Capacitor's WebChromeClient
+granting the `CAMERA` permission the manifest now declares. The installer has been built but not
+*run* — its own pages and the firewall rule it adds need an elevated install to exercise. The iOS
+shell has never been compiled at all.
 
 ## Ideas for later
 
-- A QR code in the agent window encoding the address and pairing code, so the phone scans instead
-  of typing
 - A web manifest, so adding the remote to the home screen gives a real icon and a fullscreen launch
   rather than a bookmark
 - Bring [`app/`](app) up to parity with `web/` (roles, backup picks, runes)

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Loader2 } from "lucide-react";
-import { api, type Connection } from "./lib/api";
+import { api, pairingLinkFromLocation, sameConnection, type Connection } from "./lib/api";
 import type { Champion, SummonerSpell } from "./types";
 import { useAgent } from "./hooks/useAgent";
 import { useWakeLock } from "./hooks/useWakeLock";
@@ -29,20 +29,37 @@ export default function App() {
   useWakeLock(state?.phase === "ChampSelect" || state?.readyCheck?.state === "InProgress");
 
   useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
+    let saved: Connection | null = null;
+    const stored = localStorage.getItem(STORAGE_KEY);
+    if (stored) {
       try {
-        setConnection(JSON.parse(saved) as Connection);
+        saved = JSON.parse(stored) as Connection;
       } catch {
         /* ignore corrupt storage */
       }
     }
+
+    // A pairing link in the address bar outranks whatever we remembered. That
+    // is the whole point of re-scanning: the agent's code was regenerated, or
+    // its address moved, and the saved connection is the stale one. Leaving
+    // `connection` null hands it to the connect screen, which verifies the
+    // link before saving it over the old one.
+    const link = pairingLinkFromLocation();
+    if (!link || sameConnection(link, saved)) setConnection(saved);
+
     setRestoring(false);
   }, []);
 
   const connect = (next: Connection) => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
     setConnection(next);
+
+    // The pairing code has done its job; leaving it in the address bar leaves
+    // it in history and in anything the browser syncs, and a refresh would
+    // re-run the whole pairing dance for a connection already saved.
+    if (window.location.search) {
+      window.history.replaceState(null, "", window.location.pathname);
+    }
   };
 
   const disconnect = () => {
@@ -101,6 +118,21 @@ export default function App() {
 
   const readyCheckPending = state?.readyCheck?.state === "InProgress" && state.readyCheck.playerResponse === "None";
   const [acceptBusy, setAcceptBusy] = useState(false);
+  const secondsLeft = Math.max(0, 12 - Math.floor(state?.readyCheck?.timer ?? 0));
+
+  /** One path for answering the ready check, shared by both layouts. */
+  const respond = useCallback(
+    (answer: "accept" | "decline") => {
+      if (!connection) return;
+      setAcceptBusy(true);
+      const call = answer === "accept" ? api.accept : api.decline;
+      void call(connection)
+        .then(() => showToast(answer === "accept" ? "Accepted." : "Declined.", "ok"))
+        .catch((error: Error) => showToast(error.message, "error"))
+        .finally(() => setAcceptBusy(false));
+    },
+    [connection, showToast],
+  );
 
   if (restoring) {
     return (
@@ -176,24 +208,10 @@ export default function App() {
 
       <ReadyCheckOverlay
         visible={Boolean(readyCheckPending)}
-        secondsLeft={Math.max(0, 12 - Math.floor(state?.readyCheck?.timer ?? 0))}
+        secondsLeft={secondsLeft}
         busy={acceptBusy}
-        onAccept={() => {
-          setAcceptBusy(true);
-          void api
-            .accept(connection)
-            .then(() => showToast("Accepted.", "ok"))
-            .catch((error: Error) => showToast(error.message, "error"))
-            .finally(() => setAcceptBusy(false));
-        }}
-        onDecline={() => {
-          setAcceptBusy(true);
-          void api
-            .decline(connection)
-            .then(() => showToast("Declined.", "ok"))
-            .catch((error: Error) => showToast(error.message, "error"))
-            .finally(() => setAcceptBusy(false));
-        }}
+        onAccept={() => respond("accept")}
+        onDecline={() => respond("decline")}
       />
 
       <AnimatePresence>
