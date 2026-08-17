@@ -71,8 +71,14 @@ jobs:
         run: npx cap sync android
         working-directory: web
 
+      # Committing from Windows loses the executable bit, and then this step
+      # fails instantly with "Permission denied" while the Windows job sails
+      # past because it never touches gradlew. The bit is set in the repo now;
+      # this makes the build survive it being lost again.
       - name: Assemble APK
-        run: ./gradlew assembleDebug --console=plain
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --console=plain
         working-directory: web/android
 
       - name: Name it for release
