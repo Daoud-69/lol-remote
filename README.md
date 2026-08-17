@@ -3,8 +3,22 @@
 Control League of Legends champion select from your phone — accept the ready check, pick or ban a
 champion, and choose your skin, without touching the keyboard.
 
-**[⬇ Download](https://github.com/Daoud-69/lol-remote/releases/latest)**, run the installer on your
-gaming PC, then open the link it shows you on your phone. That's the whole setup.
+### Download
+
+| | |
+|---|---|
+| **[⬇ Windows agent](https://github.com/Daoud-69/lol-remote/releases/latest/download/LoLRemoteAgent-Setup.exe)** | Runs on your gaming PC. This is the half that talks to League. |
+| **[⬇ Android app](https://github.com/Daoud-69/lol-remote/releases/latest/download/LoLRemote.apk)** | The remote itself. Optional — see below. |
+
+Install the agent, open it, and it shows you an address and a six-digit pairing code. Then either
+open that address in your phone's browser, or install the Android app and type the address into it.
+Both are the same remote; the app just gets its own icon and loses the address bar.
+
+**iPhone:** open the address in Safari and use Share → *Add to Home Screen*. It launches fullscreen
+with a proper icon, which is as close to an installed app as iOS allows without a paid Apple
+developer account.
+
+Neither download needs the source. Clone the repo only if you want to build it yourself.
 
 ## What it does
 
@@ -50,13 +64,15 @@ It also serves the [`web/`](web) remote control itself, from the same address it
 open that link in your phone's browser and you get the actual app UI, no separate server to start,
 no app install needed. The address doubles as both the API endpoint and the web app's URL.
 
+Most people should just take the [download](#download) above. To build it yourself:
+
 ```bash
 cd desktop
 npm install
 npm run package:installer
 ```
 
-Produces `desktop/build/dist/LoLRemoteAgent-Setup.<version>.exe`. Running it installs like any other
+Produces `desktop/build/dist/LoLRemoteAgent-Setup.exe`. Running it installs like any other
 Windows app — Start Menu / desktop shortcut, an optional Windows Firewall rule (covers every network
 profile, so a Wi-Fi/Ethernet connection Windows happens to classify as "Public" won't silently block
 your phone), an optional "start with Windows" shortcut, and a proper uninstaller. `package:installer`
@@ -85,23 +101,38 @@ app each time, but it's a developer workflow, not something to hand to a friend.
 
 ### 2. Phone
 
-**There is nothing to install.** The agent serves the remote itself, so:
+Whichever of these you pick, it is the same remote and the same three details: same Wi-Fi as the
+PC, the address the agent window shows, and the six-digit pairing code beside it. The connection is
+remembered, so you only type it once.
 
-1. Put the phone on the same Wi-Fi as the PC
-2. Open the address the agent window shows — something like `http://192.168.1.20:8777`
-3. Enter the six-digit pairing code next to it
+**Nothing at all.** Open the address in your phone's browser. Works on anything.
 
-It remembers the connection, so afterwards you just open the page. Add it to your home screen if
-you want it a tap away.
+**Android app.** Install the [APK](#download) and type the address in. Own icon, no address bar. It
+is [`web/`](web) wrapped by Capacitor, so it is the same UI with the same features — built with:
 
-One thing to watch: that address is handed out by your router over DHCP, so it can change when the
-PC reboots — the agent window always shows the current one. Reserving a fixed address for the PC in
-your router makes a home-screen shortcut permanent.
+```bash
+cd web
+npm run build && npx cap sync android
+cd android && ./gradlew assembleDebug
+```
 
-**The Expo client is optional and behind.** [`app/`](app) is a second, native client kept for the
-extras a browser cannot do (vibration, push while closed). It has **not** been updated for role
-presets, backup picks or runes, and its auto-pick / auto-ban controls write settings the agent no
-longer reads. It is scaffolded on **Expo SDK 57** with dependencies resolved:
+The APK is a *debug* build. It is signed with Android's debug key, which is fine for sideloading
+onto your own phone but is why Android warns about the source; shipping through a store would need
+a release keystore.
+
+**iPhone.** Safari → Share → *Add to Home Screen*. Apple honours the `apple-mobile-web-app` tags
+over plain HTTP, so it launches fullscreen with a real icon. A true native iOS build needs macOS
+and an Apple signing identity; the Capacitor project is scaffolded in [`web/ios`](web/ios) for
+whenever that exists, but it has never been built.
+
+**Watch the address.** Your router hands it out over DHCP, so it can change when the PC reboots and
+a home-screen shortcut would then point nowhere. The agent window always shows the current one;
+reserving a fixed address for the PC in your router makes it permanent.
+
+**The Expo client is optional and behind.** [`app/`](app) is an older, hand-written native client.
+It has **not** been updated for role presets, backup picks or runes, and its auto-pick / auto-ban
+controls write settings the agent no longer reads. The Android app above supersedes it. Scaffolded
+on **Expo SDK 57** with dependencies resolved:
 
 ```bash
 cd app
@@ -152,6 +183,9 @@ web/src/                The remote your phone actually loads, served by the agen
   hooks/useAutomation.ts  Settings that apply on tap and reconcile with the agent
   components/panels/    Status, ChampSelect, Automation
   components/           Champion grid and slots, role picker, rune editor, skin carousel
+web/android/            Capacitor shell — the installable Android app, same UI
+web/ios/                Capacitor shell for iOS; scaffolded, never built (needs macOS)
+web/public/             Icons and the web manifest that make it installable to a home screen
 
 app/                    Second, Expo-based client — see the note under Setup; not at parity
   App.tsx               Tab shell, ready-check overlay, toasts
@@ -283,6 +317,11 @@ Since verified on Windows against a **live League client**, in a real ranked lob
   out
 - `npm run package:installer` builds clean, producing a signed-by-nobody NSIS installer that
   offers the firewall rule and the start-with-Windows shortcut, and removes both on uninstall
+- The Android app builds, installs over adb, and launches on a real device (Redmi, MIUI V816,
+  Android 13) — note that MIUI refuses adb installs until its **Install via USB** developer option
+  is on, failing with `INSTALL_FAILED_USER_RESTRICTED` until then
+- The phone remote serves its manifest and all four icons over the LAN address with the
+  `application/manifest+json` content type both platforms require
 
 Three bugs only real games surfaced, all since fixed and covered by regression tests that fail
 against the code that had them:
@@ -294,7 +333,8 @@ against the code that had them:
 - Declaring a pick wrote to `my-selection`, which reports success and shows nothing
 
 **Not yet tested with a live client:** bench swap. The installer has been built but not *run* — its
-own pages and the firewall rule it adds need an elevated install to exercise.
+own pages and the firewall rule it adds need an elevated install to exercise. The iOS shell has
+never been compiled at all.
 
 ## Ideas for later
 
