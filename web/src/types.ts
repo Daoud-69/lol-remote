@@ -45,6 +45,8 @@ export interface ChampSelectState {
   timeLeftMs: number;
   localPlayerCellId: number;
   myAction: MyAction | null;
+  /** Our pick action, in progress or not — 0 if we have none. */
+  myPickActionId: number;
   myTeam: TeammateSlot[];
   theirTeam: TeammateSlot[];
   bans: { myTeamBans: number[]; theirTeamBans: number[] };

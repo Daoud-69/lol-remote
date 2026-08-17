@@ -34,7 +34,23 @@ export function ChampSelectPanel({
   const [backgroundSplash, setBackgroundSplash] = useState<string | null>(null);
 
   const lockedChampionId = select?.selection?.championId ?? 0;
-  const selectedSkinId = select?.selection?.selectedSkinId ?? 0;
+  const serverSkinId = select?.selection?.selectedSkinId ?? 0;
+
+  /**
+   * Tapping a skin has to travel to the agent, into the client, and back as a
+   * state push before the server would agree — long enough that the highlight
+   * appeared stuck and taps felt ignored. Show the choice at once and let the
+   * push confirm it.
+   */
+  const [pendingSkinId, setPendingSkinId] = useState(0);
+  const selectedSkinId = pendingSkinId || serverSkinId;
+
+  useEffect(() => {
+    if (pendingSkinId && serverSkinId === pendingSkinId) setPendingSkinId(0);
+  }, [serverSkinId, pendingSkinId]);
+
+  // A different champion means the old optimistic skin is meaningless.
+  useEffect(() => setPendingSkinId(0), [lockedChampionId]);
 
   useEffect(() => {
     if (!lockedChampionId) {
@@ -67,12 +83,26 @@ export function ChampSelectPanel({
       setBackgroundSplash(null);
       return;
     }
+
+    // For the champion we are locked into, the skins are already loaded. This
+    // used to refetch the whole list on every skin tap, which meant an LCU
+    // round trip per tap and a background that visibly reloaded each time.
+    if (backgroundChampionId === lockedChampionId) {
+      if (skins.length === 0) return;
+      const match =
+        skins.find((s) => s.id === selectedSkinId) ?? skins.find((s) => s.isBase) ?? skins[0];
+      setBackgroundSplash(match?.splashPath ?? null);
+      return;
+    }
+
+    // Only a champion we are merely hovering needs its own lookup, and the
+    // selected skin is irrelevant there — it belongs to a different champion.
     let cancelled = false;
     api
       .skins(connection, backgroundChampionId)
       .then((result) => {
         if (cancelled) return;
-        const match = result.find((s) => s.id === selectedSkinId) ?? result.find((s) => s.isBase) ?? result[0];
+        const match = result.find((s) => s.isBase) ?? result[0];
         setBackgroundSplash(match?.splashPath ?? null);
       })
       .catch(() => {
@@ -81,16 +111,19 @@ export function ChampSelectPanel({
     return () => {
       cancelled = true;
     };
-  }, [connection, backgroundChampionId, selectedSkinId]);
+  }, [connection, backgroundChampionId, lockedChampionId, skins, selectedSkinId]);
 
+  /** Runs a command, reports it, and says whether the client accepted it. */
   const guard = useCallback(
-    async (action: () => Promise<unknown>, success: string) => {
+    async (action: () => Promise<unknown>, success: string): Promise<boolean> => {
       setBusy(true);
       try {
         await action();
         onToast(success, "ok");
+        return true;
       } catch (error) {
         onToast((error as Error).message, "error");
+        return false;
       } finally {
         setBusy(false);
       }
@@ -228,7 +261,15 @@ export function ChampSelectPanel({
                     loading={skinsLoading}
                     connection={connection}
                     selectedSkinId={selectedSkinId}
-                    onSelect={(skinId) => void guard(() => api.setSkin(connection, skinId), "Skin selected.")}
+                    onSelect={(skinId) => {
+                      const previous = pendingSkinId;
+                      setPendingSkinId(skinId);
+                      void guard(() => api.setSkin(connection, skinId), "Skin selected.").then(
+                        (ok) => {
+                          if (!ok) setPendingSkinId(previous);
+                        },
+                      );
+                    }}
                   />
                 ) : (
                   <Muted>Lock in a champion first — the client only accepts a skin once your pick is committed.</Muted>

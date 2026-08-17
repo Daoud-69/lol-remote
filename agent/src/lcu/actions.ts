@@ -118,14 +118,28 @@ export async function readPositions(lcu: LcuClient): Promise<LobbyPositions | nu
 // --- Champ select ----------------------------------------------------------
 
 /**
- * Declares an intended pick during the planning phase, before any action is in
- * progress. This is what puts your champion on the team's screen at the very
- * start of a draft; it is not a hover and does not commit anything.
+ * Declares an intended champion during the planning phase, before bans.
+ *
+ * This has to go through the pick action with `completed: false` — the same
+ * call a hover uses — because that is what sets `championPickIntent` and puts
+ * the champion on everyone's screen. Patching `my-selection` with a championId
+ * is accepted by the client and returns success, but shows nothing: it updates
+ * the local selection record without telling the lobby, so the slot stays
+ * empty. Falls back to it only if the action patch is refused.
  */
 export async function declarePickIntent(
   lcu: LcuClient,
+  pickActionId: number,
   championId: number,
 ): Promise<void> {
+  if (pickActionId > 0) {
+    try {
+      await resolveAction(lcu, pickActionId, championId, false);
+      return;
+    } catch {
+      // Some queues have no declare step; fall through rather than fail loudly.
+    }
+  }
   await lcu.patch("/lol-champ-select/v1/session/my-selection", { championId });
 }
 
@@ -229,6 +243,19 @@ export function findMyAction(session: RawSession): MyAction | null {
   };
 }
 
+/** Our pick action id, in progress or not. 0 when we have no pick to make. */
+export function findMyPickActionId(session: RawSession): number {
+  const mine = session.actions
+    .flat()
+    .find(
+      (action) =>
+        action.actorCellId === session.localPlayerCellId &&
+        action.type === "pick" &&
+        !action.completed,
+    );
+  return mine?.id ?? 0;
+}
+
 export function parseSession(
   raw: RawSession,
   selection: ChampSelectState["selection"],
@@ -262,6 +289,7 @@ export function parseSession(
     timeLeftMs: raw.timer?.adjustedTimeLeftInPhase ?? 0,
     localPlayerCellId: raw.localPlayerCellId,
     myAction: findMyAction(raw),
+    myPickActionId: findMyPickActionId(raw),
     myTeam: (raw.myTeam ?? []).map((p) => toSlot(p, raw.localPlayerCellId)),
     theirTeam: (raw.theirTeam ?? []).map((p) => toSlot(p, raw.localPlayerCellId)),
     bans: raw.bans ?? { myTeamBans: [], theirTeamBans: [] },

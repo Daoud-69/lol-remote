@@ -53,6 +53,12 @@ export interface ChampSelectState {
   timeLeftMs: number;
   localPlayerCellId: number;
   myAction: MyAction | null;
+  /**
+   * Our pick action, whether or not it is in progress yet. During planning the
+   * ban is what `myAction` reports, but declaring an intended champion means
+   * patching the pick — so it needs to be reachable separately. 0 if we have none.
+   */
+  myPickActionId: number;
   myTeam: TeammateSlot[];
   theirTeam: TeammateSlot[];
   bans: { myTeamBans: number[]; theirTeamBans: number[] };

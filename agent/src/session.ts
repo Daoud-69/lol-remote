@@ -31,6 +31,13 @@ import {
 } from "./types.js";
 import { loadAutomation, saveAutomation } from "./config.js";
 
+/**
+ * How many times to offer a champion for one action before giving up. The
+ * client rejects picks and bans briefly around phase changes, so the first
+ * attempt failing is routine rather than final.
+ */
+const MAX_ACTION_ATTEMPTS = 4;
+
 const TOPICS = [
   "OnJsonApiEvent_lol-gameflow_v1_gameflow-phase",
   "OnJsonApiEvent_lol-matchmaking_v1_ready-check",
@@ -48,6 +55,8 @@ export class Session extends EventEmitter {
   private gameData: GameData | null = null;
   private panicTimer: NodeJS.Timeout | null = null;
   private lastAutomatedActionId: number | null = null;
+  /** Attempts made per action id, so a rejection can be retried but not forever. */
+  private automationAttempts = new Map<number, number>();
   /** Action we have already reported as having no legal choice left. */
   private exhaustedListForActionId: number | null = null;
   private spellsAppliedForSession = false;
@@ -288,13 +297,19 @@ export class Session extends EventEmitter {
     };
   }
 
-  /** First champion in `candidates` that the client will still accept. */
+  /**
+   * The champion to act on, given our ordered list.
+   *
+   * `legal` is the client's own pickable/bannable list, and it is a hint rather
+   * than a verdict: right after the ban phase opens it comes back populated but
+   * missing champions the client will accept perfectly well a few seconds
+   * later. Treating it as a veto meant sitting out the first attempt every
+   * single game. So prefer a champion it advertises, and otherwise fall back to
+   * our first untaken choice and let the client be the one to say no.
+   */
   private firstLegal(candidates: number[], legal: Set<number>, taken: Set<number>): number {
-    return (
-      candidates.find(
-        (id) => id > 0 && !taken.has(id) && (legal.size === 0 || legal.has(id)),
-      ) ?? 0
-    );
+    const available = candidates.filter((id) => id > 0 && !taken.has(id));
+    return available.find((id) => legal.has(id)) ?? available[0] ?? 0;
   }
 
   /** Champions already off the table for a pick: banned, or locked by anyone. */
@@ -362,8 +377,11 @@ export class Session extends EventEmitter {
     // guard, so the real ban turn was skipped a minute later.
     if (select.phase.toUpperCase() === "PLANNING") return;
 
-    // One automated attempt per action, so a rejected pick does not spin.
-    if (this.lastAutomatedActionId !== action.id) {
+    // Stop once an action has actually gone through; until then a rejection is
+    // worth retrying, since the client refuses picks and bans for a beat around
+    // phase boundaries. Capped so a genuinely impossible choice cannot spin.
+    const attempts = this.automationAttempts.get(action.id) ?? 0;
+    if (this.lastAutomatedActionId !== action.id && attempts < MAX_ACTION_ATTEMPTS) {
       const banning = action.type === "ban";
       const candidates = banning ? automation.banChampionIds : preset.championIds;
       const legal = banning
@@ -375,33 +393,31 @@ export class Session extends EventEmitter {
       const lock = banning ? automation.autoBanLock : automation.autoPickLock;
 
       if (championId > 0) {
-        // Consume the one-shot only once we are actually committing to a
-        // champion. Finding nothing legal can simply mean the client has not
-        // published its pickable/bannable lists yet, and the next session
-        // event is a free retry.
-        this.lastAutomatedActionId = action.id;
+        this.automationAttempts.set(action.id, attempts + 1);
         const rank = candidates.indexOf(championId);
         try {
           await resolveAction(this.lcu, action.id, championId, lock);
+          // Only a call the client accepted closes the action out.
+          this.lastAutomatedActionId = action.id;
           const name = this.gameData?.championName(championId) ?? String(championId);
           const fallback = rank > 0 ? ` (choice ${rank + 1})` : "";
           this.log(
             `Auto-${action.type}: ${name}${fallback}${lock ? " (locked)" : " (hovered)"}.`,
           );
         } catch (error) {
-          this.log(`Auto-${action.type} failed: ${describeLcuError(error)}`);
+          // Quiet on the early tries — the client rejecting a ban a second
+          // after the phase opens is normal, and logging it every time reads
+          // like a failure when the retry is about to succeed.
+          if (attempts + 1 >= MAX_ACTION_ATTEMPTS) {
+            this.log(`Auto-${action.type} failed: ${describeLcuError(error)}`);
+          }
         }
       } else if (candidates.length > 0 && this.exhaustedListForActionId !== action.id) {
-        // Say this once per action rather than on every session event, and say
-        // which filter emptied the list — "nothing left" on its own gave no
-        // clue that the real problem was running a phase too early.
+        // Once per action, not once per session event.
         this.exhaustedListForActionId = action.id;
-        const blocked = candidates.filter((id) => taken.has(id)).length;
-        const detail =
-          blocked === candidates.length
-            ? "already banned or taken"
-            : `the client lists none of them as ${action.type}able right now`;
-        this.log(`No ${action.type} from your list — ${detail}.`);
+        this.log(
+          `No ${action.type} from your list — every choice is already banned or taken.`,
+        );
       }
     }
 
@@ -427,7 +443,7 @@ export class Session extends EventEmitter {
 
     this.declaredForSession = true;
     try {
-      await declarePickIntent(this.lcu, championId);
+      await declarePickIntent(this.lcu, select.myPickActionId, championId);
       const name = this.gameData?.championName(championId) ?? String(championId);
       this.log(`Declared ${name} in the planning phase.`);
     } catch (error) {
@@ -499,6 +515,7 @@ export class Session extends EventEmitter {
     this.spellsAppliedForSession = false;
     this.declaredForSession = false;
     this.lastAutomatedActionId = null;
+    this.automationAttempts.clear();
     this.exhaustedListForActionId = null;
     this.runesAppliedFor = 0;
     this.clearPanicTimer();
