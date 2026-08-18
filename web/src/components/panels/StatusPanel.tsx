@@ -5,7 +5,7 @@ import type { LinkStatus } from "../../hooks/useAgent";
 import type { Connection } from "../../lib/api";
 import { api, profileIconUrl } from "../../lib/api";
 import { Button } from "../ui/Button";
-import { Card, SectionTitle, StatusDot } from "../ui/primitives";
+import { Card, Muted, SectionTitle, StatusDot } from "../ui/primitives";
 import { ModePicker } from "../ModePicker";
 import { FriendsCard } from "../FriendsCard";
 
@@ -64,7 +64,7 @@ export function StatusPanel({
         )}
       </Card>
 
-      {clientOk && (
+      {clientOk ? (
         <ModePicker
           connection={connection}
           currentQueueId={state?.lobby?.queueId ?? 0}
@@ -72,15 +72,25 @@ export function StatusPanel({
           canChange={state?.phase === "None" || state?.phase === "Lobby" || state?.phase === "Matchmaking"}
           onToast={onToast}
         />
+      ) : (
+        <Card>
+          <SectionTitle accent="hextech">Game mode</SectionTitle>
+          <Muted>Open the League client on your PC to pick a mode.</Muted>
+        </Card>
       )}
 
-      {clientOk && (
+      {clientOk ? (
         <FriendsCard
           connection={connection}
           canJoin={state?.phase === "None" || state?.phase === "Lobby" || state?.phase === "Matchmaking"}
           inLobby={Boolean(state?.lobby)}
           onToast={onToast}
         />
+      ) : (
+        <Card>
+          <SectionTitle accent="gold">Friends</SectionTitle>
+          <Muted>Open the League client on your PC to invite friends.</Muted>
+        </Card>
       )}
 
       <Card>

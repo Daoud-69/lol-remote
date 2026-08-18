@@ -53,13 +53,13 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 function createWindow(): void {
-  // The cards need about 860px to lay out in full, and the window scrolls when
-  // they don't get it. Open tall enough that they do — but never taller than
-  // the screen, or a 768px laptop gets a window running off the bottom.
+  // Wide enough that the embedded Remote control tab gets the web app's full
+  // two-column layout by default, rather than opening cramped into its
+  // single-column (phone-width) fallback. Still never bigger than the screen.
   const { workAreaSize } = screen.getPrimaryDisplay();
 
   mainWindow = new BrowserWindow({
-    width: 460,
+    width: Math.min(960, workAreaSize.width - 80),
     height: Math.min(900, workAreaSize.height - 80),
     minWidth: 400,
     // Was 560, which is roughly what the cards need laid out in full. Now that
