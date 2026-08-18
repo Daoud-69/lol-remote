@@ -118,11 +118,40 @@ export const POSITIONS: Position[] = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTIL
 /** What the lobby's role selector accepts, on top of the five real roles. */
 export type PositionPreference = Position | "FILL" | "UNSELECTED";
 
+/**
+ * One playable mode, as the client currently advertises it.
+ *
+ * Read live from the client rather than listed here: Riot rotates modes in and
+ * out constantly, so a hardcoded list would be wrong within weeks.
+ */
+export interface GameQueue {
+  id: number;
+  /** What the client’s own button says, e.g. "Draft Pick", "ARAM", "Arena". */
+  name: string;
+  description: string;
+  /** "CLASSIC", "ARAM", "CHERRY" (Arena), "TFT", … — used to group the list. */
+  gameMode: string;
+  category: string;
+  isRanked: boolean;
+  /** Played against bots. Decided from the queue type, not the category,
+   *  which the client mislabels for Classic Rift. */
+  isBots: boolean;
+  /** Built through the custom-lobby call, not by queue id. */
+  isCustom: boolean;
+  teamSize: number;
+  /** Heading to file this under, in the client’s own words ("ARAM", "Classic Rift"). */
+  group: string;
+}
+
 export interface LobbyPositions {
   first: PositionPreference;
   second: PositionPreference;
   /** False in modes with no role selector (ARAM, Arena, most customs). */
   selectable: boolean;
+  /** Which mode this lobby is for; 0 when the client did not say. */
+  queueId: number;
+  /** Resolved mode name, e.g. "ARAM"; empty outside a lobby. */
+  queueName: string;
 }
 
 /**

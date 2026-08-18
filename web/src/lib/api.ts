@@ -2,6 +2,8 @@ import type {
   AutomationPatch,
   AutomationSettings,
   Champion,
+  CustomGame,
+  GameQueue,
   LobbyPositions,
   PositionPreference,
   RecommendedRunePage,
@@ -190,6 +192,25 @@ export const api = {
   benchSwap: (c: Connection, championId: number) => post<{ ok: true }>(c, "/api/bench-swap", { championId }),
 
   startQueue: (c: Connection) => post<{ ok: true }>(c, "/api/queue/start"),
+
+  /** Modes the client is offering right now — never cached, they rotate. */
+  queues: (c: Connection) => call<GameQueue[]>(c, "/api/queues"),
+
+  setQueue: (c: Connection, queueId: number) =>
+    post<LobbyPositions | null>(c, "/api/queue", { queueId }),
+
+  leaveQueue: (c: Connection) => call<{ ok: true }>(c, "/api/queue", { method: "DELETE" }),
+
+  /** Practice Tool and the custom presets, which need a config rather than an id. */
+  createCustom: (
+    c: Connection,
+    body: { queueId: number; name: string; teamSize: number; password?: string; spectators?: string },
+  ) => post<LobbyPositions | null>(c, "/api/custom", body),
+
+  customGames: (c: Connection) => call<CustomGame[]>(c, "/api/custom-games"),
+
+  joinCustom: (c: Connection, partyId: string, password?: string) =>
+    post<LobbyPositions | null>(c, "/api/custom-games/join", { partyId, password }),
   stopQueue: (c: Connection) => post<{ ok: true }>(c, "/api/queue/stop"),
 
   setAutomation: (c: Connection, patch: AutomationPatch) =>

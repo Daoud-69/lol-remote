@@ -6,6 +6,7 @@ import type { Connection } from "../../lib/api";
 import { api, profileIconUrl } from "../../lib/api";
 import { Button } from "../ui/Button";
 import { Card, SectionTitle, StatusDot } from "../ui/primitives";
+import { ModePicker } from "../ModePicker";
 
 export function StatusPanel({
   state,
@@ -62,6 +63,16 @@ export function StatusPanel({
         )}
       </Card>
 
+      {clientOk && (
+        <ModePicker
+          connection={connection}
+          currentQueueId={state?.lobby?.queueId ?? 0}
+          currentQueueName={state?.lobby?.queueName ?? ""}
+          canChange={state?.phase === "None" || state?.phase === "Lobby" || state?.phase === "Matchmaking"}
+          onToast={onToast}
+        />
+      )}
+
       <Card>
         <SectionTitle accent="gold">Right now</SectionTitle>
         <PhaseVisualizer phase={state?.phase ?? "None"} connected={clientOk} />
@@ -76,6 +87,15 @@ export function StatusPanel({
           <Button variant="ghost" size="md" className="w-full mt-4" onClick={() => void run(() => api.stopQueue(connection), "Queue stopped.")}>
             Stop queue
           </Button>
+        )}
+        {state?.phase === "Lobby" && (
+          <button
+            type="button"
+            className="w-full mt-2 text-[11px] font-bold uppercase tracking-wider text-ink-dim hover:text-danger transition-colors"
+            onClick={() => void run(() => api.leaveQueue(connection), "Left the lobby.")}
+          >
+            Leave lobby
+          </button>
         )}
       </Card>
 

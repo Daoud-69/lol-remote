@@ -6,15 +6,21 @@ import {
   acceptReadyCheck,
   bannableChampionIds,
   completeAction,
+  createCustomLobby,
+  createLobby,
   declarePickIntent,
+  joinCustomGame,
   describeLcuError,
+  leaveLobby,
   parseSession,
   pickableChampionIds,
   readPositions,
+  readQueueNames,
   resolveAction,
   setPositionPreferences,
   setSpells,
   type RawSession,
+  type CustomLobbyOptions,
 } from "./lcu/actions.js";
 import { applyRunePage } from "./lcu/runes.js";
 import {
@@ -120,6 +126,7 @@ export class Session extends EventEmitter {
       lcu.connectEvents(TOPICS);
 
       this.state.connectedToClient = true;
+      await this.cacheQueueNames();
       await this.refreshAll();
       this.log("Connected to the League client.");
 
@@ -166,7 +173,7 @@ export class Session extends EventEmitter {
       if (event.uri === "/lol-lobby/v2/lobby") {
         // The role selector is the one bit of lobby state the phone drives, and
         // it can change from the PC too, so mirror it rather than assume.
-        this.state.lobby = this.lcu ? await readPositions(this.lcu) : null;
+        this.state.lobby = await this.readLobby();
         this.publish();
         return;
       }
@@ -568,10 +575,114 @@ export class Session extends EventEmitter {
       first,
       second,
       selectable: this.state.lobby?.selectable ?? true,
+      queueId: this.state.lobby?.queueId ?? 0,
+      queueName: this.state.lobby?.queueName ?? "",
     };
     this.log(`Set roles to ${titleCase(first)} / ${titleCase(second)}.`);
     this.publish();
     return this.state.lobby;
+  }
+
+  /**
+   * Picks the mode by putting the client in that mode’s lobby — the client has
+   * no mode setting, only which lobby you are sitting in.
+   *
+   * Refused outright once a game is under way rather than passed to the client:
+   * mid-champ-select the client answers with something unreadable, and the
+   * honest message is that you cannot change mode now.
+   */
+  async setQueue(queueId: number): Promise<LobbyPositions | null> {
+    if (!this.lcu) throw new Error("Not connected to the League client yet.");
+
+    this.guardLobbyChange();
+
+    await createLobby(this.lcu, queueId);
+    this.state.lobby = await this.readLobby();
+    this.log(`Switched to ${this.queueName(queueId)}.`);
+    this.publish();
+    return this.state.lobby;
+  }
+
+  /**
+   * Stands up a custom lobby — Practice Tool included, since the client treats
+   * it as one. Same phase guard as picking a mode: the client will not swap you
+   * out of champion select or a live game, and its refusal reads badly.
+   */
+  async createCustom(options: CustomLobbyOptions): Promise<LobbyPositions | null> {
+    if (!this.lcu) throw new Error("Not connected to the League client yet.");
+    this.guardLobbyChange();
+
+    await createCustomLobby(this.lcu, options);
+    this.state.lobby = await this.readLobby();
+    this.log(`Created a ${this.queueName(options.queueId)} lobby.`);
+    this.publish();
+    return this.state.lobby;
+  }
+
+  /** Joins somebody else's public custom lobby. */
+  async joinCustom(partyId: string, password?: string): Promise<LobbyPositions | null> {
+    if (!this.lcu) throw new Error("Not connected to the League client yet.");
+    this.guardLobbyChange();
+
+    await joinCustomGame(this.lcu, partyId, password);
+    this.state.lobby = await this.readLobby();
+    this.log("Joined a custom lobby.");
+    this.publish();
+    return this.state.lobby;
+  }
+
+  /** Shared by every "put me in a different lobby" path. */
+  private guardLobbyChange(): void {
+    const phase = this.state.phase;
+    if (phase !== "None" && phase !== "Lobby" && phase !== "Matchmaking") {
+      throw new Error(`You are already in ${describePhase(phase)} — leave that first.`);
+    }
+  }
+
+  /** Drops out of the lobby, back to the client’s play menu. */
+  async leaveQueue(): Promise<void> {
+    if (!this.lcu) throw new Error("Not connected to the League client yet.");
+    await leaveLobby(this.lcu);
+    this.state.lobby = null;
+    this.log("Left the lobby.");
+    this.publish();
+  }
+
+  /**
+   * Lobby state with the mode named. Kept in one place because the raw call
+   * only reports a queue id, and an id is not something to put on screen.
+   */
+  private async readLobby(): Promise<LobbyPositions | null> {
+    if (!this.lcu) return null;
+    const lobby = await readPositions(this.lcu);
+    if (!lobby) return null;
+    return { ...lobby, queueName: this.queueName(lobby.queueId) };
+  }
+
+  /**
+   * Names every queue the client knows, once per connection. Modes only change
+   * when the client restarts or patches, so this does not need refreshing, and
+   * failing is survivable — labels fall back to the id.
+   */
+  private async cacheQueueNames(): Promise<void> {
+    if (!this.lcu) return;
+    try {
+      this.queueNames = await readQueueNames(this.lcu);
+    } catch {
+      /* labels degrade to "queue <id>", which beats failing to connect */
+    }
+  }
+
+  /** Cached so a log line can name a mode without another round trip. */
+  private queueNames = new Map<number, string>();
+
+  rememberQueueNames(queues: { id: number; name: string }[]): void {
+    for (const queue of queues) this.queueNames.set(queue.id, queue.name);
+  }
+
+  private queueName(queueId: number): string {
+    if (queueId <= 0) return "";
+    return this.queueNames.get(queueId) ?? `Queue ${queueId}`;
   }
 
   // --- Snapshot ------------------------------------------------------------
@@ -608,7 +719,7 @@ export class Session extends EventEmitter {
       this.state.phase = "None";
     }
 
-    this.state.lobby = await readPositions(this.lcu);
+    this.state.lobby = await this.readLobby();
 
     try {
       const raw = await this.lcu.get<RawSession>("/lol-champ-select/v1/session");
@@ -647,4 +758,12 @@ function isPosition(value: string): value is Position {
 /** "UTILITY" reads badly in a log line; "Utility" does not. */
 function titleCase(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1).toLowerCase();
+}
+
+/** Phase names as a sentence fragment, for "you are already in …". */
+function describePhase(phase: string): string {
+  if (phase === "ChampSelect") return "champion select";
+  if (phase === "ReadyCheck") return "a ready check";
+  if (phase === "InProgress") return "a game";
+  return "a game already";
 }
