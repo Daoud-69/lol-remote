@@ -150,7 +150,7 @@ export default function App() {
     <div className="min-h-svh flex flex-col">
       <TopBar status={status} onDisconnect={disconnect} />
 
-      <div className="flex-1 max-w-6xl w-full mx-auto px-5 lg:px-8 py-6 pb-28 lg:pb-10">
+      <div className="flex-1 max-w-6xl 2xl:max-w-[1600px] w-full mx-auto px-5 lg:px-8 py-6 pb-28 lg:pb-10">
         {state ? (
           <div className="lg:grid lg:grid-cols-[340px_1fr] lg:gap-8 lg:items-start">
             {/* Desktop sidebar: settings live here, always visible. */}
