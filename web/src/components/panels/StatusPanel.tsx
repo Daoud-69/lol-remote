@@ -7,6 +7,7 @@ import { api, profileIconUrl } from "../../lib/api";
 import { Button } from "../ui/Button";
 import { Card, SectionTitle, StatusDot } from "../ui/primitives";
 import { ModePicker } from "../ModePicker";
+import { FriendsCard } from "../FriendsCard";
 
 export function StatusPanel({
   state,
@@ -69,6 +70,15 @@ export function StatusPanel({
           currentQueueId={state?.lobby?.queueId ?? 0}
           currentQueueName={state?.lobby?.queueName ?? ""}
           canChange={state?.phase === "None" || state?.phase === "Lobby" || state?.phase === "Matchmaking"}
+          onToast={onToast}
+        />
+      )}
+
+      {clientOk && (
+        <FriendsCard
+          connection={connection}
+          canJoin={state?.phase === "None" || state?.phase === "Lobby" || state?.phase === "Matchmaking"}
+          inLobby={Boolean(state?.lobby)}
           onToast={onToast}
         />
       )}

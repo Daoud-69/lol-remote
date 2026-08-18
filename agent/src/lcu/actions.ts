@@ -313,6 +313,14 @@ export function describeLcuError(error: unknown): string {
   if (error instanceof LcuError) {
     try {
       const parsed = JSON.parse(error.body) as { message?: string };
+      // A couple of the client’s own messages are shouted enum names rather
+      // than sentences, and these two are the ones a phone actually hits.
+      if (parsed.message === "PARTY_NOT_FOUND") {
+        return "That party no longer exists — ask for a fresh link.";
+      }
+      if (parsed.message === "INVALID_LOBBY") {
+        return "The client would not accept that lobby.";
+      }
       if (parsed.message) return parsed.message;
     } catch {
       // Fall through to the generic description.
@@ -637,5 +645,295 @@ export async function joinCustomGame(
 ): Promise<void> {
   await lcu.post(`/lol-lobby/v2/party/${encodeURIComponent(partyId)}/join`, {
     password: password?.trim() ? password.trim() : "",
+  });
+}
+
+// --- Friends and parties ---------------------------------------------------
+
+/** A friend, plus their party if they are advertising one. */
+/**
+ * Where a friend is, as one value.
+ *
+ * Resolved here rather than on the phone because it takes three separate LCU
+ * fields to work out, and none of them alone is the answer: `availability` is a
+ * chat status ("dnd" while in a game), `lol.gameStatus` is the real game state,
+ * and `product` says whether they are even on League.
+ */
+export type FriendStatus =
+  | "inGame"
+  | "championSelect"
+  | "inParty"
+  | "online"
+  | "mobile"
+  | "otherGame"
+  | "offline";
+
+export interface Friend {
+  puuid: string;
+  /** Riot ID, e.g. "Faker#KR1". */
+  name: string;
+  availability: string;
+  status: FriendStatus;
+  /** True when they are on League rather than another Riot game. */
+  playingLeague: boolean;
+  /** What they are queued for or playing; 0 when that is not applicable. */
+  queueId: number;
+  /** Resolved by the session, which holds the queue-name cache. */
+  queueName: string;
+  statusMessage: string;
+  profileIconId: number;
+  /** Which of the client’s friend groups they sit in. */
+  groupId: number;
+  groupName: string;
+  party: {
+    partyId: string;
+    /** Only an open party can be joined without an invite. */
+    isOpen: boolean;
+    queueId: number;
+    /** Resolved by the session, which holds the queue-name cache. */
+    queueName: string;
+    players: number;
+    maxPlayers: number;
+  } | null;
+}
+
+interface RawFriend {
+  puuid?: string;
+  gameName?: string;
+  gameTag?: string;
+  name?: string;
+  availability?: string;
+  productName?: string;
+  product?: string;
+  statusMessage?: string;
+  icon?: number;
+  displayGroupId?: number;
+  displayGroupName?: string;
+  // Presence is stringly typed: queueId arrives as "420", not 420.
+  lol?: { pty?: string; gameStatus?: string; queueId?: number | string };
+}
+
+/**
+ * Everyone on the friends list, with whatever party they are broadcasting.
+ *
+ * The party arrives as a JSON *string* inside `lol.pty` — presence data, not a
+ * typed field — so it is parsed defensively: a friend whose payload is malformed
+ * should still show up as a friend rather than taking the whole list down.
+ *
+ * `isPartyOpen` inside it is the bit that matters. An open party can be joined
+ * by party id without an invite; a closed one cannot, and offering a Join button
+ * for it would just produce an error.
+ */
+export async function listFriends(lcu: LcuClient): Promise<Friend[]> {
+  const raw = await lcu.get<RawFriend[]>("/lol-chat/v1/friends");
+
+  return raw
+    .filter((friend) => Boolean(friend.puuid))
+    .map((friend) => {
+      let party: Friend["party"] = null;
+      if (friend.lol?.pty) {
+        try {
+          const parsed = JSON.parse(friend.lol.pty) as {
+            partyId?: string;
+            isPartyOpen?: boolean;
+            queueId?: number | string;
+            maxPlayers?: number;
+            summoners?: unknown[];
+          };
+          if (parsed.partyId) {
+            party = {
+              partyId: parsed.partyId,
+              isOpen: Boolean(parsed.isPartyOpen),
+              queueId: Number(parsed.queueId ?? 0) || 0,
+              queueName: "",
+              players: Array.isArray(parsed.summoners) ? parsed.summoners.length : 0,
+              maxPlayers: parsed.maxPlayers ?? 0,
+            };
+          }
+        } catch {
+          /* presence is best-effort; a bad payload just means "no party" */
+        }
+      }
+
+      const tag = friend.gameTag ? `#${friend.gameTag}` : "";
+      return {
+        puuid: friend.puuid!,
+        name: `${friend.gameName || friend.name || "Unknown"}${tag}`,
+        availability: friend.availability ?? "offline",
+        status: friendStatus(friend, party),
+        // Coerced, because presence sends it as a string and a number-keyed
+        // cache misses silently — every mode showed as "Queue 420".
+        queueId: Number(friend.lol?.queueId ?? 0) || 0,
+        queueName: "",
+        // Friends on VALORANT or the mobile app appear here too, and their
+        // parties are not ones a League client can join.
+        playingLeague: (friend.product ?? "") === "league_of_legends",
+        statusMessage: friend.statusMessage ?? "",
+        profileIconId: friend.icon ?? 0,
+        groupId: friend.displayGroupId ?? 0,
+        groupName: friendGroupLabel(friend.displayGroupName ?? ""),
+        party,
+      };
+    });
+}
+
+/**
+ * Which bucket a friend belongs in.
+ *
+ * Order matters, and it is not the order you would guess. `availability` cannot
+ * lead: every friend in a game reports "dnd", which says nothing about whether
+ * they are playing. `lol.gameStatus` is what the client's own list reads, so
+ * that decides the game states, and the rest fall out from where they are logged
+ * in — measured against a live list: 13 inGame, 1 championSelect, 2 outOfGame,
+ * 8 on the mobile app, 1 in VALORANT, 159 offline.
+ */
+function friendStatus(friend: RawFriend, party: Friend["party"]): FriendStatus {
+  if ((friend.availability ?? "offline") === "offline") return "offline";
+  // The mobile app reports no game status at all, so it has to be caught first.
+  if (friend.availability === "mobile") return "mobile";
+  if ((friend.product ?? "") !== "league_of_legends") return "otherGame";
+
+  const gameStatus = friend.lol?.gameStatus ?? "";
+  if (gameStatus === "inGame") return "inGame";
+  if (gameStatus === "championSelect") return "championSelect";
+  // A lobby is only worth calling out when they are advertising the party.
+  if (party) return "inParty";
+  return "online";
+}
+
+/**
+ * Sends a friend request to a Riot ID.
+ *
+ * Two steps, because the chat service wants a puuid and nobody knows their
+ * friends by puuid: the alias resolver turns "Name#TAG" into an account first.
+ * A name that does not exist comes back as an empty array rather than an error,
+ * which is why that case is checked explicitly.
+ */
+export async function addFriend(
+  lcu: LcuClient,
+  gameName: string,
+  tagLine: string,
+): Promise<string> {
+  const matches = await lcu.post<{ puuid?: string; gameName?: string; tagLine?: string }[]>(
+    "/lol-summoner/v1/summoners/aliases",
+    [{ gameName, tagLine }],
+  );
+
+  const found = matches?.find((match) => match.puuid);
+  if (!found?.puuid) {
+    throw new Error(`No player called ${gameName}#${tagLine}.`);
+  }
+
+  await lcu.post("/lol-chat/v2/friend-requests", {
+    puuid: found.puuid,
+    direction: "out",
+  });
+  return `${found.gameName ?? gameName}#${found.tagLine ?? tagLine}`;
+}
+
+/**
+ * Invites friends into the lobby you are already in.
+ *
+ * The client takes an array, so several people go out in one call. Either a
+ * puuid or a summoner id identifies the target; puuid is what the friends list
+ * hands over, so that is what this uses.
+ */
+export async function inviteToLobby(lcu: LcuClient, puuids: string[]): Promise<void> {
+  if (puuids.length === 0) return;
+  await lcu.post(
+    "/lol-lobby/v2/lobby/invitations",
+    puuids.map((toPuuid) => ({ toPuuid })),
+  );
+}
+
+
+// --- Friend groups ---------------------------------------------------------
+
+/** One of the client's own friend groups, as its social panel shows them. */
+export interface FriendGroup {
+  id: number;
+  name: string;
+  /** The client's own ordering; lower sorts first. */
+  priority: number;
+  collapsed: boolean;
+}
+
+interface RawFriendGroup {
+  id?: number;
+  name?: string;
+  priority?: number;
+  collapsed?: boolean;
+  isMetaGroup?: boolean;
+}
+
+/**
+ * The client's friend groups, in the order the client itself lists them.
+ *
+ * `priority` is the client's ordering, so that is what this sorts on rather than
+ * imposing one. The default group ships with the literal name `**Default`, which
+ * is a placeholder the client localises on screen and nobody wants to read, so it
+ * gets a sensible label here.
+ */
+export async function listFriendGroups(lcu: LcuClient): Promise<FriendGroup[]> {
+  const raw = await lcu.get<RawFriendGroup[]>("/lol-chat/v1/friend-groups");
+  return raw
+    .filter((group) => group.id !== undefined && !group.isMetaGroup)
+    .map((group) => ({
+      id: group.id!,
+      name: friendGroupLabel(group.name ?? ""),
+      priority: group.priority ?? 0,
+      collapsed: Boolean(group.collapsed),
+    }))
+    .sort((a, b) => a.priority - b.priority || a.name.localeCompare(b.name));
+}
+
+/** `**Default` is the client's placeholder for the ungrouped bucket. */
+export function friendGroupLabel(name: string): string {
+  return name === "**Default" || name === "" ? "Ungrouped" : name;
+}
+
+export async function createFriendGroup(lcu: LcuClient, name: string): Promise<void> {
+  await lcu.post("/lol-chat/v1/friend-groups", { name: name.trim() });
+}
+
+export async function renameFriendGroup(
+  lcu: LcuClient,
+  id: number,
+  name: string,
+): Promise<void> {
+  await lcu.put(`/lol-chat/v1/friend-groups/${id}`, { id, name: name.trim() });
+}
+
+export async function deleteFriendGroup(lcu: LcuClient, id: number): Promise<void> {
+  await lcu.request("DELETE", `/lol-chat/v1/friend-groups/${id}`);
+}
+
+/**
+ * Moves a friend into a group.
+ *
+ * The route takes a whole friend resource rather than a patch, so the current one
+ * is read and handed back with only the group changed — sending a partial object
+ * would blank out everything left out of it, including the note you wrote about
+ * them.
+ *
+ * The path segment is not the puuid. `GET /lol-chat/v1/friends/{puuid}` answers
+ * 404 \"Friend Not Found\" — the route wants the friend's `id` field instead,
+ * which is the puuid with the platform appended (`<puuid>@eu1.pvp.net`). That is
+ * only available from the list endpoint, so a friend is looked up there first.
+ */
+export async function moveFriendToGroup(
+  lcu: LcuClient,
+  puuid: string,
+  groupId: number,
+): Promise<void> {
+  const friends = await lcu.get<Record<string, unknown>[]>("/lol-chat/v1/friends");
+  const friend = friends.find((row) => row.puuid === puuid);
+  if (!friend?.id) {
+    throw new Error("That friend is not on your list anymore.");
+  }
+
+  await lcu.put(`/lol-chat/v1/friends/${encodeURIComponent(String(friend.id))}`, {
+    ...friend,
+    groupId,
   });
 }

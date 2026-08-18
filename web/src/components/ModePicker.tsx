@@ -167,15 +167,20 @@ export function ModePicker({
         ) : (
           <div>
             {/* Only tabs with something in them — an empty tab is a dead end, and
-                which ones have content is the client's call. Scrolls sideways
-                rather than squeezing five labels across a phone. */}
-            <div className="-mx-1 mb-5 flex gap-1 overflow-x-auto no-scrollbar px-1">
+                which ones have content is the client's call.
+
+                Wraps rather than scrolling sideways. Five labels at the client's
+                own wording total more than a phone's width, and a scrolling strip
+                cut "Join custom" off mid-border at the sheet edge — which reads as
+                a broken layout, not as something you can swipe. Two tidy rows
+                beats a hidden affordance. */}
+            <div className="mb-5 flex flex-wrap gap-1.5">
               {TABS.filter((t) => t.id === "join" || tabFor(queues, t.id).length > 0).map((t) => (
                 <button
                   key={t.id}
                   type="button"
                   onClick={() => setTab(t.id)}
-                  className={`shrink-0 whitespace-nowrap rounded-lg border px-3 py-2 text-[11px] font-bold uppercase tracking-wider transition-colors ${
+                  className={`whitespace-nowrap rounded-lg border px-3 py-2 text-[11px] font-bold uppercase tracking-wider transition-colors ${
                     tab === t.id
                       ? "border-hextech/40 bg-hextech/15 text-hextech"
                       : "border-hairline bg-white/[0.03] text-ink-dim hover:text-ink-muted"
