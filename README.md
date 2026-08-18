@@ -24,13 +24,18 @@ Neither download needs the source. Clone the repo only if you want to build it y
 ## What it does
 
 **From the phone, live:**
+- **The whole play menu** — PvP, Co-op vs. AI, Training, Create Custom and Join Custom, the same five
+  tabs the client has. Pick ARAM, Draft, Ranked, Arena, TFT, Swiftplay or whatever is rotating this
+  month; open Practice Tool; stand up a custom lobby with a name, team size, password and spectator
+  policy; or browse and join a public custom game. The list is read from the client itself, so a mode
+  added after you installed this still shows up
 - Accept / decline the ready check (full-screen takeover + vibration + push notification)
 - Pick your two lobby roles — the same selector the client shows, driven from the phone
 - Hover and lock a champion on your pick turn, or ban on your ban turn
 - Set both summoner spells
 - Pick a skin once you're locked in (owned skins selectable, locked ones shown greyed)
 - Swap from the ARAM/Swiftplay bench
-- Start and stop matchmaking
+- Start and stop matchmaking, and leave the lobby again
 
 **Automation, for when you're not looking at the phone either:**
 - Auto-accept, with an optional delay so you can still decline
@@ -198,6 +203,7 @@ web/src/                The remote your phone actually loads, served by the agen
   hooks/useAutomation.ts  Settings that apply on tap and reconcile with the agent
   components/panels/    Status, ChampSelect, Automation
   components/           Champion grid and slots, role picker, rune editor, skin carousel
+  components/ModePicker.tsx  The play menu: five tabs, custom-lobby form, lobby browser
   components/QrScanner.tsx  Camera viewfinder for the installed app, lazy-loaded
 web/android/            Capacitor shell — the installable Android app, same UI
 web/ios/                Capacitor shell for iOS; scaffolded, never built (needs macOS)
@@ -229,6 +235,74 @@ Phone (browser)  ──HTTP + WebSocket──▶  Agent (Node, on your PC)  ─�
 The agent talks to the **LCU** (League Client Update) API — the same local HTTPS API the client's
 own UI uses. It reads the port and auth token from the running `LeagueClientUx.exe` process, so
 there's nothing to configure.
+
+**Picking a mode.** The client has no "mode" setting — there is only which lobby you are sitting
+in, so choosing a mode means `POST /lol-lobby/v2/lobby` with a queue id. The list of modes comes
+from `/lol-game-queues/v1/queues` on every request rather than being baked in here, which is the
+only way this keeps working: Riot rotates modes constantly. Checked against a live client, that
+endpoint returned 88 rows, of which 17 survive filtering — the rest are retired events, hidden
+internal rows and customs, which are created through a different call entirely.
+
+Four of those 17 carried `gameMode` values that did not exist when this was written (`SWIFTPLAY`,
+`KIWI`, `KIWI_JADE`, `JADE`), which is the whole point: an unrecognised mode still appears and is
+still playable, it just lands under "Other modes" instead of getting its own heading. Grouping is
+the only thing decided locally; availability is always the client's answer.
+
+The picker mirrors the client's play menu, and both of its levels come from the client rather than
+from anything written down here. The tab is whether the queue is played against bots; the heading
+beneath it is the map's `gameModeName` from `/lol-maps/v2/maps`. That is why Swiftplay files itself
+under Summoner's Rift, why the rotating Mayhem codenames (`KIWI`, `KIWI_JADE`) file themselves under
+ARAM, and why `mapId 453` comes out as "Classic Rift" — none of those names appear in the source.
+Use `gameModeName` and not `name`, incidentally: for the Howling Abyss, `name` is "Random Map" while
+`gameModeName` is "ARAM".
+
+**Three traps in this data, every one of which shipped a bug before being found.**
+
+First, `category` does not identify bot games. Classic Rift ships as two queues that are identical
+in name (`Classic`), `gameMode` (`JADE`) and `mapId` (453) — 4310 is `JADE_RANKED_SOLO_5x5`
+("Classic 5v5") and 4320 is `JADE_BOT` ("Classic Co-op vs. AI") — and the API reports **both** as
+`category: "PvP"`, even though the client itself files the second under Co-op vs. AI. The `type` is
+the only field that separates them, so bot detection reads that. Trusting the category put a bot
+queue in the PvP tab, where tapping "Classic" started a co-op match.
+
+Second, `isRanked` over-reports. The client sets it `true` on 4310, which its own UI does not
+present as ranked — the type inherits "RANKED_SOLO_5x5" from the ruleset the mode is built on rather
+than from being ranked. Genuinely ranked queues have a type *starting* with `RANKED_`, while
+mode-specific variants carry a prefix, so both are required. The bias is deliberately towards
+under-badging: a missing badge is a cosmetic miss, whereas labelling a casual queue "Ranked" lies
+about what you are about to queue into.
+
+Third, do not deduplicate. An earlier version collapsed queues sharing a `gameMode` and name,
+which looked reasonable and quietly dropped one of those two Classic queues — keeping whichever came
+first in the client's list, which was the bot one. Queue ids are already unique; distinct ids are
+distinct modes, and there is nothing to merge.
+
+One wrinkle worth stating: queue 400 is named "Normal" and only its *description* says "Draft Pick",
+so the list shows a description whenever it differs from the name and hides it when it merely
+repeats it. Without that, draft is not findable by eye.
+
+The mode you are in is reported by name, not id, including for lobbies the picker deliberately
+hides — sitting in a Practice Tool lobby reads as "Multiplayer Practice Tool Custom" rather than
+"Queue 3140". The agent caches the id-to-name map once per connection, since modes only change when
+the client restarts.
+
+**Custom lobbies, Practice Tool included.** These are the one thing a queue id alone cannot start.
+The client models them as a `customGameLobby` configuration — map, mode, team size, name, password,
+spectator policy — but the configuration on its own is refused: `INVALID_LOBBY` for Practice Tool and
+a bare 400 for the rest. The queue id has to travel **alongside** it, and once it does everything
+works. The id is also what the client treats as authoritative: asking for 3140 with `gameMode:
+"CLASSIC"` still produced a `PRACTICETOOL` lobby.
+
+That is why the presets configure themselves. Each Custom-category queue already carries the map, the
+mode and its pick rules, so "SR Draft Pick Custom" needs nothing from this codebase beyond the name
+and team size you choose — and a draft custom comes back with `showPositionSelector` true, so the
+role picker appears for it and not for a blind one.
+
+**Joining a public custom.** The browser lives at `/lol-lobby/v1/custom-games`. Watch the
+identifier: every row comes back with `id: 0`, and `partyId` is the only thing that distinguishes one
+lobby from another — 100 rows, 100 distinct party ids, one distinct `id`. Joining therefore goes
+through `POST /lol-lobby/v2/party/{partyId}/join`; the obvious-looking
+`/lol-lobby/v1/custom-games/{id}/join` wants a uint64 and is useless with an id that is always zero.
 
 **Pairing by QR.** The code encodes one string — `http://<address>:8777/?code=123456` — and that one
 string covers both routes, because it is the URL the remote is *already* served from with the
@@ -367,6 +441,50 @@ against the code that had them:
 - The ban then sat out its first proper attempt too, because the client's `bannable-champion-ids`
   omits champions it will accept moments later
 - Declaring a pick wrote to `my-selection`, which reports success and shows nothing
+
+Mode picking, verified against a **live League client**:
+
+- `/lol-game-queues/v1/queues` returns 88 rows; filtering leaves the 18 the client's own play menu
+  offers, and the tabs and headings come out matching the client's exactly:
+  **PvP** — Summoner's Rift (Normal/Draft Pick, Swiftplay, Ranked Solo/Duo, Ranked Flex), ARAM
+  (ARAM, Mayhem, Mayhem Classic-ish), Teamfight Tactics (five, including Double Up and Tocker's
+  Trials), Arena, Classic Rift (Classic 5v5); **Co-op vs. AI** — Summoner's Rift (Intro, Beginner,
+  Intermediate), Classic Rift (Classic Co-op vs. AI)
+- Nothing lands in "Other modes", and each group orders the way a player expects (Normal before
+  Ranked, Intro before Intermediate). Groups sort by lowest queue id, which tracks the client's own
+  order and is stable — sorting by group size was not, since one extra TFT variant pushed the Rift
+  below it
+- The two same-named Classic Rift queues stay distinct and land in the right tabs: 4310 under PvP,
+  4320 under Co-op vs. AI
+- The current lobby is reported by name: a live Practice Tool lobby came back as
+  `queueName: "Multiplayer Practice Tool Custom"`, confirming the filter correctly treats customs
+  as unpickable while still naming them
+- `POST /api/queue` with no queueId is refused with 400
+
+Driven through a browser against a stand-in agent serving that same captured list: every group
+renders, draft is findable by its description, ranked modes are badged, choosing ARAM posts queue
+450 and the card renames itself, the start-queue button appears, and leaving returns to the empty
+state.
+
+Custom lobbies and the browser, against the same live client:
+
+- Practice Tool (3140), SR Draft Pick Custom (3110) with team size 3, a password and lobby-only
+  spectators, and Howling Abyss Blind Custom (3200) all created successfully through the agent's own
+  API, and the draft custom came back with the role selector enabled where the blind ones did not
+- A bad spectator policy is refused with a readable message rather than passed to the client
+- The public browser returned 100 lobbies with names, owners, resolved map names, player counts and
+  password flags
+- All five tabs render on a phone-sized viewport, and the create form shows name, team size, password
+  and spectator controls
+
+**Not tested:** actually joining someone's lobby. The route is confirmed to exist — a deliberately
+bogus party id comes back `400 PARTY_NOT_FOUND` rather than 404 — but joining a stranger's game to
+prove it seemed a poor use of somebody else's lobby.
+
+Then exercised for real, from a phone against a live client: **11 mode switches** covering every
+group — Normal (Draft Pick), Swiftplay, Ranked Solo/Duo, Ranked Flex, ARAM, ARAM: Mayhem
+Classic-ish, Teamfight Tactics (Double Up) and Classic — with matchmaking started and stopped on top.
+Every switch landed, and the client's own play menu followed each one.
 
 QR pairing, verified without a phone in hand:
 

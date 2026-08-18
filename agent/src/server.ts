@@ -11,6 +11,8 @@ import {
   benchSwap,
   declineReadyCheck,
   describeLcuError,
+  listCustomGames,
+  listQueues,
   resolveAction,
   setSkin,
   setSpells,
@@ -158,6 +160,13 @@ export async function startServer(
 
   // --- Lobby ---------------------------------------------------------------
 
+  const VALID_SPECTATOR_POLICIES = new Set([
+    "AllAllowed",
+    "FriendsAllowed",
+    "LobbyAllowed",
+    "NotAllowed",
+  ]);
+
   const VALID_POSITIONS = new Set([
     "TOP",
     "JUNGLE",
@@ -186,6 +195,79 @@ export async function startServer(
         first as PositionPreference,
         second as PositionPreference,
       );
+    });
+  });
+
+  // --- Game modes ----------------------------------------------------------
+
+  /**
+   * The modes the client is currently offering. Read live on every request
+   * rather than cached at startup, because a rotating mode can appear or
+   * vanish while the agent is running.
+   */
+  app.get("/api/queues", (_req, res) => {
+    void run(res, async () => {
+      const queues = await listQueues(session.getClient());
+      // Lets the agent name a mode in its activity log later.
+      session.rememberQueueNames(queues);
+      return queues;
+    });
+  });
+
+  app.post("/api/queue", (req, res) => {
+    void run(res, async () => {
+      const queueId = Number(req.body?.queueId);
+      if (!queueId) throw new HttpError(400, "queueId is required.");
+      return session.setQueue(queueId);
+    });
+  });
+
+  /** Practice Tool and the custom presets, which need a whole config, not an id. */
+  app.post("/api/custom", (req, res) => {
+    void run(res, async () => {
+      const queueId = Number(req.body?.queueId);
+      if (!queueId) throw new HttpError(400, "queueId is required.");
+
+      const spectators = String(req.body?.spectators ?? "AllAllowed");
+      if (!VALID_SPECTATOR_POLICIES.has(spectators)) {
+        throw new HttpError(400, `"${spectators}" is not a spectator policy the client accepts.`);
+      }
+
+      const teamSize = Number(req.body?.teamSize ?? 5);
+      if (!Number.isInteger(teamSize) || teamSize < 1 || teamSize > 5) {
+        throw new HttpError(400, "teamSize must be between 1 and 5.");
+      }
+
+      return session.createCustom({
+        queueId,
+        name: String(req.body?.name ?? ""),
+        teamSize,
+        password: req.body?.password ? String(req.body.password) : undefined,
+        spectators: spectators as "AllAllowed" | "FriendsAllowed" | "LobbyAllowed" | "NotAllowed",
+      });
+    });
+  });
+
+  /** The public custom lobbies. Read live — the list turns over constantly. */
+  app.get("/api/custom-games", (_req, res) => {
+    void run(res, async () => listCustomGames(session.getClient()));
+  });
+
+  app.post("/api/custom-games/join", (req, res) => {
+    void run(res, async () => {
+      const partyId = String(req.body?.partyId ?? "");
+      if (!partyId) throw new HttpError(400, "partyId is required.");
+      return session.joinCustom(
+        partyId,
+        req.body?.password ? String(req.body.password) : undefined,
+      );
+    });
+  });
+
+  app.delete("/api/queue", (_req, res) => {
+    void run(res, async () => {
+      await session.leaveQueue();
+      return { ok: true };
     });
   });
 

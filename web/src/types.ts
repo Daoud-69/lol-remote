@@ -94,10 +94,45 @@ export const POSITIONS: Position[] = ["TOP", "JUNGLE", "MIDDLE", "BOTTOM", "UTIL
 
 export type PositionPreference = Position | "FILL" | "UNSELECTED";
 
+export interface GameQueue {
+  id: number;
+  name: string;
+  description: string;
+  gameMode: string;
+  category: string;
+  isRanked: boolean;
+  /** Played against bots. Decided from the queue type, not the category,
+   *  which the client mislabels for Classic Rift. */
+  isBots: boolean;
+  /** Built through the custom-lobby call, not by queue id. */
+  isCustom: boolean;
+  teamSize: number;
+  /** Heading to file this under, in the client’s own words ("ARAM", "Classic Rift"). */
+  group: string;
+}
+
+/** A public custom lobby, as the client’s browser lists them. */
+export interface CustomGame {
+  /** The only field that identifies a lobby — every row reports id: 0. */
+  partyId: string;
+  name: string;
+  owner: string;
+  mapId: number;
+  map: string;
+  hasPassword: boolean;
+  players: number;
+  maxPlayers: number;
+  spectators: number;
+  maxSpectators: number;
+}
+
 export interface LobbyPositions {
   first: PositionPreference;
   second: PositionPreference;
   selectable: boolean;
+  queueId: number;
+  /** Resolved mode name, e.g. "ARAM"; empty outside a lobby. */
+  queueName: string;
 }
 
 export interface RunePage {

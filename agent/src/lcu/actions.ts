@@ -1,6 +1,7 @@
 import { LcuClient, LcuError } from "./client.js";
 import type {
   ChampSelectState,
+  GameQueue,
   LobbyPositions,
   MyAction,
   PositionPreference,
@@ -96,7 +97,7 @@ interface RawLobbyMember {
 }
 
 interface RawLobby {
-  gameConfig?: { showPositionSelector?: boolean };
+  gameConfig?: { showPositionSelector?: boolean; queueId?: number };
   localMember?: RawLobbyMember;
 }
 
@@ -108,6 +109,10 @@ export async function readPositions(lcu: LcuClient): Promise<LobbyPositions | nu
       first: (lobby.localMember?.firstPositionPreference || "UNSELECTED") as PositionPreference,
       second: (lobby.localMember?.secondPositionPreference || "UNSELECTED") as PositionPreference,
       selectable: Boolean(lobby.gameConfig?.showPositionSelector),
+      queueId: lobby.gameConfig?.queueId ?? 0,
+      // Resolved by the session, which holds the id-to-name cache; naming it
+      // here would mean another round trip on every lobby event.
+      queueName: "",
     };
   } catch {
     // 404 here just means "no lobby", which is not worth surfacing as an error.
@@ -317,4 +322,320 @@ export function describeLcuError(error: unknown): string {
     return `League client error ${error.status}.`;
   }
   return error instanceof Error ? error.message : String(error);
+}
+
+// --- Game modes ------------------------------------------------------------
+
+/**
+ * Raw queue as the client describes it. Riot adds, removes and rotates modes
+ * constantly, so this is read live rather than baked into a list here — that is
+ * the whole reason the mode picker works for a mode that did not exist when
+ * this shipped.
+ */
+interface RawQueue {
+  id: number;
+  name?: string;
+  shortName?: string;
+  description?: string;
+  detailedDescription?: string;
+  category?: string;
+  gameMode?: string;
+  /** e.g. NORMAL, RANKED_SOLO_5x5, JADE_BOT — the only field that tells
+   *  Classic PvP apart from Classic Co-op vs. AI. */
+  type?: string;
+  mapId?: number;
+  isRanked?: boolean;
+  isVisible?: boolean;
+  isTeamBuilderManaged?: boolean;
+  queueAvailability?: string;
+  maximumParticipantListSize?: number;
+  numPlayersPerTeam?: number;
+  /** Older clients exposed this instead of queueAvailability. */
+  isAvailable?: boolean;
+  /** `id` here is the mutator that picks blind vs draft for a custom lobby. */
+  gameTypeConfig?: { id?: number };
+}
+
+/**
+ * The modes this account can actually queue for right now.
+ *
+ * Filtered rather than passed through whole: the endpoint returns hundreds of
+ * entries, most of them retired events, bot difficulties and internal rows the
+ * client itself never shows. What is left is what the client's own play menu
+ * would offer.
+ */
+export async function listQueues(lcu: LcuClient): Promise<GameQueue[]> {
+  const [raw, labels] = await Promise.all([
+    lcu.get<RawQueue[]>("/lol-game-queues/v1/queues"),
+    mapLabels(lcu),
+  ]);
+
+  const queues = raw
+    .filter((queue) => {
+      if (!queue.id || queue.id < 0) return false;
+      if (queue.isVisible === false) return false;
+      // Two spellings across client versions; absent means "no opinion", which
+      // we treat as available rather than hiding a mode that works.
+      if (queue.queueAvailability && queue.queueAvailability !== "Available") return false;
+      if (queue.isAvailable === false) return false;
+      // Customs are kept, but they are built through a different call — see
+      // createCustomLobby — so they are flagged rather than mixed in.
+      return Boolean(queue.name || queue.shortName);
+    })
+    .map((queue) => ({
+      id: queue.id,
+      // shortName is what the client's own buttons say ("Draft Pick"); name is
+      // the long form ("5v5 Draft Pick games").
+      name: (queue.shortName || queue.name || `Queue ${queue.id}`).trim(),
+      description: (queue.description || queue.detailedDescription || "").trim(),
+      gameMode: queue.gameMode ?? "",
+      category: queue.category ?? "",
+      isRanked: isRankedQueue(queue),
+      teamSize: queue.numPlayersPerTeam ?? 0,
+      isBots: isBotQueue(queue),
+      isCustom: queue.category === "Custom",
+      // The heading this belongs under, in the client’s own words.
+      group:
+        labels.get(`${queue.mapId}|${queue.gameMode}`) ??
+        labels.get(`${queue.mapId}|`) ??
+        "Other modes",
+    }));
+
+  return queues;
+}
+
+/**
+ * Whether a queue is really ranked.
+ *
+ * `isRanked` alone is not enough: the client reports it `true` for 4310
+ * (`JADE_RANKED_SOLO_5x5`, "Classic 5v5"), which its own UI does not present as
+ * a ranked queue — the type name inherits "RANKED_SOLO_5x5" from the ruleset the
+ * mode is built on, not from being ranked itself. Every genuinely ranked queue's
+ * type *starts* with `RANKED_` (`RANKED_SOLO_5x5`, `RANKED_FLEX_SR`,
+ * `RANKED_TFT`, `RANKED_TFT_DOUBLE_UP`), while mode-specific variants carry a
+ * prefix, so requiring both the flag and that prefix separates them.
+ *
+ * Deliberately biased towards under-badging: failing to mark a ranked queue is a
+ * missing badge, while marking a casual one ranked is a lie about what you are
+ * queueing into.
+ */
+function isRankedQueue(queue: RawQueue): boolean {
+  return Boolean(queue.isRanked) && /^RANKED_/.test((queue.type ?? "").toUpperCase());
+}
+
+/**
+ * Whether a queue is played against bots.
+ *
+ * `category` is not trustworthy for this. Classic Rift ships as two queues that
+ * are identical in name, gameMode and map — 4310 (`JADE_RANKED_SOLO_5x5`,
+ * "Classic 5v5") and 4320 (`JADE_BOT`, "Classic Co-op vs. AI") — and the client
+ * files the second under Co-op vs. AI while the API calls *both* `category:
+ * "PvP"`. The `type` is what actually distinguishes them, so that is what this
+ * reads. Matching `BOT` as a whole underscore-delimited word covers the shapes
+ * seen in the wild (`JADE_BOT`, `RIOTSCRIPT_BOT`) without also catching a mode
+ * that merely has "bot" inside a longer word.
+ */
+function isBotQueue(queue: RawQueue): boolean {
+  if (queue.category === "VersusAi") return true;
+  return /(^|_)BOT(_|$)/.test((queue.type ?? "").toUpperCase());
+}
+
+/**
+ * Puts the client in a lobby for one mode, which is what "pick a mode" means to
+ * the client — there is no mode setting, only which lobby you are sitting in.
+ * Called with a queue we are already in, the client treats it as a no-op rather
+ * than an error.
+ */
+export async function createLobby(lcu: LcuClient, queueId: number): Promise<void> {
+  await lcu.post("/lol-lobby/v2/lobby", { queueId });
+}
+
+/** Leaves the current lobby, so the client lands back on its play menu. */
+export async function leaveLobby(lcu: LcuClient): Promise<void> {
+  await lcu.request("DELETE", "/lol-lobby/v2/lobby");
+}
+
+/**
+ * Every queue id the client knows, named — including the customs the mode
+ * picker deliberately hides.
+ *
+ * The picker's list and the label for the lobby you are *in* are different
+ * questions: sitting in a Practice Tool lobby is a real state to report even
+ * though it is not a mode you can pick from here, and "Queue 3140" is not a
+ * useful thing to show anybody.
+ */
+export async function readQueueNames(lcu: LcuClient): Promise<Map<number, string>> {
+  const raw = await lcu.get<RawQueue[]>("/lol-game-queues/v1/queues");
+  return new Map(
+    raw
+      .filter((queue) => Boolean(queue.id))
+      .map((queue) => [
+        queue.id,
+        (queue.shortName || queue.name || `Queue ${queue.id}`).trim(),
+      ]),
+  );
+}
+
+/**
+ * Map labels keyed by `mapId|gameMode`, which is how the client titles the
+ * second level of its play menu — those headings are *maps*, not game modes.
+ *
+ * `gameModeName` is the field to use, not `name`: for the Howling Abyss, `name`
+ * reads "Random Map" while `gameModeName` reads "ARAM". It also resolves several
+ * things a hand-written list kept getting wrong — Swiftplay comes back as
+ * "Summoner's Rift" (it is a ruleset on that map, and the client files it there),
+ * the rotating Mayhem codenames all come back as "ARAM", and mapId 453 comes
+ * back as "Classic Rift".
+ */
+async function mapLabels(lcu: LcuClient): Promise<Map<string, string>> {
+  const labels = new Map<string, string>();
+  try {
+    const maps = await lcu.get<
+      { id: number; gameMode?: string; gameModeName?: string; name?: string; isDefault?: boolean }[]
+    >("/lol-maps/v2/maps");
+    for (const map of maps) {
+      const label = (map.gameModeName || map.name || "").trim();
+      if (!label) continue;
+      labels.set(`${map.id}|${map.gameMode ?? ""}`, label);
+      // A per-map fallback, for a queue whose gameMode has no map row of its own.
+      if (map.isDefault || !labels.has(`${map.id}|`)) labels.set(`${map.id}|`, label);
+    }
+  } catch {
+    /* headings degrade to "Other modes" rather than failing the whole list */
+  }
+  return labels;
+}
+
+// --- Custom games ----------------------------------------------------------
+
+/** What the phone can choose when standing up a custom lobby. */
+export interface CustomLobbyOptions {
+  /** One of the Custom-category queues; it carries the map, mode and mutator. */
+  queueId: number;
+  name: string;
+  teamSize: number;
+  password?: string;
+  spectators?: "AllAllowed" | "FriendsAllowed" | "LobbyAllowed" | "NotAllowed";
+}
+
+/**
+ * Creates a custom lobby — which is also how Practice Tool is started.
+ *
+ * Custom games are the one thing a queue id alone cannot express: posting
+ * `{ queueId: 3140 }` is answered with `400 INVALID_REQUEST`. They need a whole
+ * `customGameLobby` configuration instead. Rather than hardcode one per mode,
+ * the shape is derived from the Custom-category queue the caller picked: that row
+ * already carries the map, the game mode and — in `gameTypeConfig.id` — the
+ * mutator that decides blind versus draft (19 and 18 on the client this was
+ * built against). So "SR Draft Pick Custom" configures itself.
+ */
+export async function createCustomLobby(
+  lcu: LcuClient,
+  options: CustomLobbyOptions,
+): Promise<void> {
+  const queues = await lcu.get<RawQueue[]>("/lol-game-queues/v1/queues");
+  const queue = queues.find((row) => row.id === options.queueId);
+  if (!queue) throw new Error("That mode is not one the client is offering.");
+
+  const teamSize = Math.max(1, Math.min(options.teamSize || 5, queue.numPlayersPerTeam || 5));
+  const mutatorId = queue.gameTypeConfig?.id;
+
+  await lcu.post("/lol-lobby/v2/lobby", {
+    // The queue id has to travel *alongside* the configuration. Sending the
+    // configuration on its own is rejected — INVALID_LOBBY for Practice Tool,
+    // 400 for the rest — and the id is what the client treats as authoritative:
+    // asking for 3140 with gameMode CLASSIC still produced a PRACTICETOOL lobby.
+    queueId: options.queueId,
+    customGameLobby: {
+      configuration: {
+        gameMode: queue.gameMode ?? "CLASSIC",
+        gameMutator: "",
+        gameServerRegion: "",
+        mapId: queue.mapId ?? 11,
+        // Omitting this entirely gets the client's default pick mode, which is
+        // wrong for every preset except blind.
+        ...(mutatorId ? { mutators: { id: mutatorId } } : {}),
+        spectatorPolicy: options.spectators ?? "AllAllowed",
+        teamSize,
+        maxPlayerCount: teamSize * 2,
+      },
+      lobbyName: options.name.trim() || "Custom Game",
+      // The client wants null rather than "" for "no password".
+      lobbyPassword: options.password?.trim() ? options.password.trim() : null,
+    },
+    isCustom: true,
+  });
+}
+
+/** A public custom lobby, as the browser lists them. */
+export interface CustomGame {
+  partyId: string;
+  name: string;
+  owner: string;
+  mapId: number;
+  /** Resolved map name, so the phone shows "ARAM" and not a number. */
+  map: string;
+  hasPassword: boolean;
+  players: number;
+  maxPlayers: number;
+  spectators: number;
+  maxSpectators: number;
+}
+
+interface RawCustomGame {
+  partyId?: string;
+  lobbyName?: string;
+  ownerDisplayName?: string;
+  mapId?: number;
+  hasPassword?: boolean;
+  filledPlayerSlots?: number;
+  maxPlayerSlots?: number;
+  filledSpectatorSlots?: number;
+  maxSpectatorSlots?: number;
+}
+
+/**
+ * The public custom lobbies, newest listing the client has.
+ *
+ * Note the identifier: every row comes back with `id: 0`, and `partyId` is the
+ * only thing that distinguishes one lobby from another — 100 rows, 100 distinct
+ * party ids, one distinct `id`. Anything keyed on `id` would join the wrong
+ * lobby, or nothing at all.
+ */
+export async function listCustomGames(lcu: LcuClient): Promise<CustomGame[]> {
+  const [raw, labels] = await Promise.all([
+    lcu.get<RawCustomGame[]>("/lol-lobby/v1/custom-games"),
+    mapLabels(lcu),
+  ]);
+  return raw
+    .filter((game) => Boolean(game.partyId))
+    .map((game) => ({
+      partyId: game.partyId!,
+      name: (game.lobbyName || "Untitled lobby").trim(),
+      owner: (game.ownerDisplayName || "").trim(),
+      mapId: game.mapId ?? 0,
+      map: labels.get(`${game.mapId}|`) ?? "",
+      hasPassword: Boolean(game.hasPassword),
+      players: game.filledPlayerSlots ?? 0,
+      maxPlayers: game.maxPlayerSlots ?? 0,
+      spectators: game.filledSpectatorSlots ?? 0,
+      maxSpectators: game.maxSpectatorSlots ?? 0,
+    }));
+}
+
+/**
+ * Joins a public custom lobby by party id.
+ *
+ * `/lol-lobby/v1/custom-games/{id}/join` is the obvious-looking route and is the
+ * wrong one — it wants a uint64 `id`, which is always 0. The party route takes
+ * the uuid that actually identifies a lobby.
+ */
+export async function joinCustomGame(
+  lcu: LcuClient,
+  partyId: string,
+  password?: string,
+): Promise<void> {
+  await lcu.post(`/lol-lobby/v2/party/${encodeURIComponent(partyId)}/join`, {
+    password: password?.trim() ? password.trim() : "",
+  });
 }
