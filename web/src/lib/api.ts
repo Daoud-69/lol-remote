@@ -3,6 +3,8 @@ import type {
   AutomationSettings,
   Champion,
   CustomGame,
+  Friend,
+  FriendGroup,
   GameQueue,
   LobbyPositions,
   PositionPreference,
@@ -211,6 +213,35 @@ export const api = {
 
   joinCustom: (c: Connection, partyId: string, password?: string) =>
     post<LobbyPositions | null>(c, "/api/custom-games/join", { partyId, password }),
+
+  friends: (c: Connection) => call<Friend[]>(c, "/api/friends"),
+
+  addFriend: (c: Connection, riotId: string) =>
+    post<{ ok: true; name: string }>(c, "/api/friends", { riotId }),
+
+  /** Joins a friend’s open party. */
+  joinParty: (c: Connection, partyId: string) =>
+    post<LobbyPositions | null>(c, "/api/party/join", { partyId }),
+
+  inviteFriends: (c: Connection, puuids: string[]) =>
+    post<{ ok: true; sent: number }>(c, "/api/lobby/invite", { puuids }),
+
+  friendGroups: (c: Connection) => call<FriendGroup[]>(c, "/api/friend-groups"),
+
+  createFriendGroup: (c: Connection, name: string) =>
+    post<FriendGroup[]>(c, "/api/friend-groups", { name }),
+
+  renameFriendGroup: (c: Connection, id: number, name: string) =>
+    call<FriendGroup[]>(c, `/api/friend-groups/${id}`, {
+      method: "PUT",
+      body: JSON.stringify({ name }),
+    }),
+
+  deleteFriendGroup: (c: Connection, id: number) =>
+    call<FriendGroup[]>(c, `/api/friend-groups/${id}`, { method: "DELETE" }),
+
+  moveFriendToGroup: (c: Connection, puuid: string, groupId: number) =>
+    post<{ ok: true }>(c, `/api/friends/${encodeURIComponent(puuid)}/group`, { groupId }),
   stopQueue: (c: Connection) => post<{ ok: true }>(c, "/api/queue/stop"),
 
   setAutomation: (c: Connection, patch: AutomationPatch) =>

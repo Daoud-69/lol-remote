@@ -6,21 +6,31 @@ import {
   acceptReadyCheck,
   bannableChampionIds,
   completeAction,
+  addFriend,
   createCustomLobby,
+  createFriendGroup,
   createLobby,
   declarePickIntent,
+  deleteFriendGroup,
   joinCustomGame,
   describeLcuError,
+  inviteToLobby,
   leaveLobby,
+  listFriendGroups,
+  listFriends,
+  moveFriendToGroup,
   parseSession,
   pickableChampionIds,
   readPositions,
   readQueueNames,
+  renameFriendGroup,
   resolveAction,
   setPositionPreferences,
   setSpells,
   type RawSession,
   type CustomLobbyOptions,
+  type Friend,
+  type FriendGroup,
 } from "./lcu/actions.js";
 import { applyRunePage } from "./lcu/runes.js";
 import {
@@ -627,6 +637,109 @@ export class Session extends EventEmitter {
     await joinCustomGame(this.lcu, partyId, password);
     this.state.lobby = await this.readLobby();
     this.log("Joined a custom lobby.");
+    this.publish();
+    return this.state.lobby;
+  }
+
+  /**
+   * The friends list, with each advertised party's mode named.
+   *
+   * The names come from the same cache the lobby label uses, so a friend queued
+   * for 420 reads as "Ranked Solo/Duo" rather than a number.
+   */
+  async listFriends(): Promise<Friend[]> {
+    if (!this.lcu) throw new Error("Not connected to the League client yet.");
+    const friends = await listFriends(this.lcu);
+    return friends.map((friend) => ({
+      ...friend,
+      queueName: this.queueName(friend.queueId),
+      party: friend.party
+        ? { ...friend.party, queueName: this.queueName(friend.party.queueId) }
+        : null,
+    }));
+  }
+
+  async addFriend(gameName: string, tagLine: string): Promise<string> {
+    if (!this.lcu) throw new Error("Not connected to the League client yet.");
+    const who = await addFriend(this.lcu, gameName, tagLine);
+    this.log(`Sent a friend request to ${who}.`);
+    this.publish();
+    return who;
+  }
+
+  /** The client’s own friend groups, in its own order. */
+  async listFriendGroups(): Promise<FriendGroup[]> {
+    if (!this.lcu) throw new Error("Not connected to the League client yet.");
+    return listFriendGroups(this.lcu);
+  }
+
+  async createFriendGroup(name: string): Promise<FriendGroup[]> {
+    if (!this.lcu) throw new Error("Not connected to the League client yet.");
+    const trimmed = name.trim();
+    if (!trimmed) throw new Error("Give the group a name.");
+    await createFriendGroup(this.lcu, trimmed);
+    this.log(`Created the "${trimmed}" friend group.`);
+    return listFriendGroups(this.lcu);
+  }
+
+  async renameFriendGroup(id: number, name: string): Promise<FriendGroup[]> {
+    if (!this.lcu) throw new Error("Not connected to the League client yet.");
+    const trimmed = name.trim();
+    if (!trimmed) throw new Error("Give the group a name.");
+    await renameFriendGroup(this.lcu, id, trimmed);
+    return listFriendGroups(this.lcu);
+  }
+
+  /**
+   * Deletes a friend group. The client itself moves that group’s friends back
+   * to Ungrouped rather than refusing or orphaning them, so nothing here has to
+   * handle their relocation.
+   */
+  async deleteFriendGroup(id: number): Promise<FriendGroup[]> {
+    if (!this.lcu) throw new Error("Not connected to the League client yet.");
+    await deleteFriendGroup(this.lcu, id);
+    this.log("Deleted a friend group.");
+    return listFriendGroups(this.lcu);
+  }
+
+  async moveFriendToGroup(puuid: string, groupId: number): Promise<void> {
+    if (!this.lcu) throw new Error("Not connected to the League client yet.");
+    await moveFriendToGroup(this.lcu, puuid, groupId);
+  }
+
+  /**
+   * Invites friends into the lobby we are in. Refused when there is no lobby,
+   * because the client's own error for that case says nothing useful.
+   */
+  async invite(puuids: string[]): Promise<number> {
+    if (!this.lcu) throw new Error("Not connected to the League client yet.");
+
+    // Read the lobby rather than trust the cached copy. Lobby state is kept in
+    // sync by events, and a missed one would let this sail past the guard into
+    // an unreadable error from the client.
+    const lobby = await this.readLobby();
+    if (!lobby) {
+      this.state.lobby = null;
+      this.publish();
+      throw new Error("Make a lobby first — there is nothing to invite anyone to.");
+    }
+
+    await inviteToLobby(this.lcu, puuids);
+    this.log(
+      puuids.length === 1 ? "Invited a friend to the lobby." : `Invited ${puuids.length} friends.`,
+    );
+    this.publish();
+    return puuids.length;
+  }
+
+  /** Joins a friend's open party. */
+  async joinParty(partyId: string): Promise<LobbyPositions | null> {
+    if (!this.lcu) throw new Error("Not connected to the League client yet.");
+    this.guardLobbyChange();
+
+    await joinCustomGame(this.lcu, partyId);
+    this.state.lobby = await this.readLobby();
+    this.log("Joined a party.");
     this.publish();
     return this.state.lobby;
   }

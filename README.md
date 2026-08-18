@@ -29,6 +29,11 @@ Neither download needs the source. Clone the repo only if you want to build it y
   month; open Practice Tool; stand up a custom lobby with a name, team size, password and spectator
   policy; or browse and join a public custom game. The list is read from the client itself, so a mode
   added after you installed this still shows up
+- **Friends and parties** — the list grouped by status (in game, online, champion select, in a party,
+  Riot Mobile, other Riot games, offline) with that order reorderable to taste, or grouped by the
+  client's own friend groups with create, rename, delete and drag-free move-between. Each friend shows
+  the mode they are actually in. Join a party when its owner left it open, invite friends into a lobby
+  you made, and add somebody by Riot ID
 - Accept / decline the ready check (full-screen takeover + vibration + push notification)
 - Pick your two lobby roles — the same selector the client shows, driven from the phone
 - Hover and lock a champion on your pick turn, or ban on your ban turn
@@ -204,6 +209,7 @@ web/src/                The remote your phone actually loads, served by the agen
   components/panels/    Status, ChampSelect, Automation
   components/           Champion grid and slots, role picker, rune editor, skin carousel
   components/ModePicker.tsx  The play menu: five tabs, custom-lobby form, lobby browser
+  components/FriendsCard.tsx  Friends: reorderable status view, client-style groups, invites
   components/QrScanner.tsx  Camera viewfinder for the installed app, lazy-loaded
 web/android/            Capacitor shell — the installable Android app, same UI
 web/ios/                Capacitor shell for iOS; scaffolded, never built (needs macOS)
@@ -303,6 +309,88 @@ identifier: every row comes back with `id: 0`, and `partyId` is the only thing t
 lobby from another — 100 rows, 100 distinct party ids, one distinct `id`. Joining therefore goes
 through `POST /lol-lobby/v2/party/{partyId}/join`; the obvious-looking
 `/lol-lobby/v1/custom-games/{id}/join` wants a uint64 and is useless with an id that is always zero.
+
+**Friends and their parties.** `/lol-chat/v1/friends` is the list, and each friend's party arrives
+as a JSON *string* inside `lol.pty` — presence data rather than a typed field, so it is parsed
+defensively: a malformed payload should cost that one friend their party badge, not take the list
+down. The field that matters inside it is `isPartyOpen`. Only an open party can be joined without an
+invite, and joining goes through the same `POST /lol-lobby/v2/party/{partyId}/join` the custom-game
+browser uses — a friend's party and a public custom are the same thing to the client.
+
+Closed parties are still listed, marked "Invite only" rather than hidden. On a real friends list most
+parties are closed — 184 friends, 26 online, 3 in a party and none of them open, the first time this
+was run — so filtering them out leaves a blank panel that reads as broken when the honest answer is
+"they are playing, you just need an invite".
+
+**Adding a friend** takes two calls, because the chat service wants a puuid and nobody knows their
+friends by puuid: `POST /lol-summoner/v1/summoners/aliases` turns `Name#TAG` into an account, then
+`POST /lol-chat/v2/friend-requests` with `{ puuid, direction: "out" }`. Worth noting that the
+request body decides whether that route is even recognised — posting `{ gameName, tagLine }` to it
+answers `405 WRONG_METHOD`, which looks like the wrong verb and is not.
+
+**Working out where a friend is.** No single field says it, and the obvious one is a trap.
+`availability` is a *chat* status — it reads `dnd` for everybody in a game, which tells you nothing
+about whether they are playing. The real game state is `lol.gameStatus` (`inGame`,
+`championSelect`, `outOfGame`), which is what the client's own list reads, and `product` says whether
+they are even on League. The agent resolves all three into one status so both clients group the same
+way. Measured against a live list: 159 offline, 13 in game, 8 on the mobile app, 2 idle, 1 in champion
+select, 1 in VALORANT.
+
+Two details that bite. The mobile app reports **no** game status at all, so it has to be matched
+before anything that reads `gameStatus`. And `lol.queueId` arrives as the **string** `"420"` while the
+queue-name cache is keyed by number — so every friend's mode rendered as "Queue 420" until it was
+coerced, a miss that fails silently rather than throwing.
+
+Offline is drawn last and collapsed. Most of a real list is offline, and rendering all of it buries
+everyone you could actually play with.
+
+**Reordering the status buckets.** Which comes first — "In game" or "Online" — is a preference with
+no correct default, so it lives in `localStorage` on the phone rather than in the agent: two people
+sharing one PC can each keep their own order. The saved order is repaired against the known statuses
+on load rather than trusted outright, so a status that did not exist when someone last saved their
+order still appears, appended in the default place.
+
+**The client's own friend groups.** Read and managed directly through `/lol-chat/v1/friend-groups`
+(list, create, rename, delete) and `PUT /lol-chat/v1/friends/{id}` (move). The default bucket ships
+under the literal name `**Default` — a placeholder the client localises on screen — so it is relabelled
+"Ungrouped" here rather than shown verbatim.
+
+One real trap in the move route: `GET /lol-chat/v1/friends/{puuid}` answers `404 Friend Not Found`.
+The path segment the route actually wants is the friend's `id` field, which is the puuid with the
+platform appended (`<puuid>@eu1.pvp.net`), and that is only available from the list endpoint — so a
+move looks the friend up there first rather than addressing them by the id the rest of this API uses
+everywhere else. The route also takes a whole friend resource rather than a patch, so the record is
+read back and returned with only `groupId` changed; sending a partial object would blank out
+everything left off it, including a note written about them.
+
+Deleting a group was verified to relocate its members to Ungrouped automatically rather than orphaning
+them, which is why the delete route needs no migration step of its own — the client already does it.
+
+**One thing this does not attempt.** The client also exposes `PUT /lol-chat/v1/friend-groups/order`
+for reordering someone's own groups (Ungrouped vs. a custom one), and testing the create/delete cycle
+shifted that order once as a side effect — no friends moved, nothing renamed, just the two groups'
+relative position on the client's own list swapped. Several request shapes were tried against that
+endpoint to restore it programmatically; all either failed outright or returned success with no visible
+effect, and guessing further risked compounding the change rather than fixing it. It was left alone —
+trivially fixable by hand, since the client's own social panel reorders groups by dragging — and no UI
+here calls that route, so this feature will not reproduce the swap.
+**Inviting friends into your lobby.** `POST /lol-lobby/v2/lobby/invitations` takes an array, so
+several people go out in one call, and each entry may identify its target by either `toSummonerId` or
+`toPuuid` — puuid, since that is what the friends list already hands over. The agent refuses when
+there is no lobby rather than passing that case to the client, whose own error for it says nothing
+useful, and it re-reads the lobby rather than trusting its cached copy so a missed event cannot slip
+past that check.
+
+An invite only reaches a friend who is **idle or in a party of their own**. It does not reach one
+who is mid-game or in champion select, is not deliverable to the Riot Mobile app, and obviously not to
+anyone offline — so the button is only offered for the two statuses that can receive it. A friend
+whose party is *open* gets Join instead, which is the more useful of the two.
+
+Note there is deliberately no "join by invite link" here. The client's own link is
+`https://gg.riotgames.com/LOL?joinCode=…`, and nothing local can redeem one: of the client's six join
+functions, the three that mention a code all take an *activity* id and **return** a code, and none
+accepts one as input. Inviting solves the same problem from the other end — you pull people into your
+lobby instead of them pushing a link at you.
 
 **Pairing by QR.** The code encodes one string — `http://<address>:8777/?code=123456` — and that one
 string covers both routes, because it is the URL the remote is *already* served from with the
@@ -465,6 +553,41 @@ Driven through a browser against a stand-in agent serving that same captured lis
 renders, draft is findable by its description, ranked modes are badged, choosing ARAM posts queue
 450 and the card renames itself, the start-queue button appears, and leaving returns to the empty
 state.
+
+Friends and parties, against a live client with a real 184-friend list:
+
+- The list comes back with online status, status messages and profile icons, and the three friends in
+  a party were correctly reported as closed, each with its mode named from the queue cache
+  ("Ranked Flex", "Normal", "ARAM: Mayhem") rather than a queue id
+- Closed parties render an inert "Invite only" button; the Join button is disabled until there is
+  something to join, and enables the moment a party id is pasted
+- Every failure path gives a sentence rather than an enum: no tag in the Riot ID, a name that does
+  not exist, unparseable paste, and a stale party id (which the client answers `PARTY_NOT_FOUND`)
+- The list groups into the client's own categories in order, empty ones omitted, with each friend
+  labelled by the mode they are in ("Ranked Flex", "ARAM: Mayhem", "Howling Abyss Blind Custom")
+  rather than by a chat status. Offline starts collapsed and expands on request
+- Reordering persists to `localStorage`, survives a full page reload, and the status view redraws in
+  the new order immediately — checked by moving "In game" below "Online" and confirming both the
+  header order and a reload agree
+- Friend groups verified end to end against a live 184-friend, two-group list, driven through the
+  actual UI: switching to the group view lists Ungrouped and the existing custom group; creating,
+  renaming, moving a real friend into the new group (confirmed by the toast and an updated count), and
+  deleting it all worked, and deleting relocated that friend back to Ungrouped exactly as the client's
+  own behaviour promises. The friend was moved back and the test group removed afterward, leaving the
+  list as it was found
+- Invite is offered only where it can land. Against a live list with a lobby open: In game 13 → none,
+  Champion select 1 → none, Riot Mobile 8 → none, Other Riot games 1 → none, Offline 158 → none,
+  Online 2 → both, and the one friend with an open party got Join instead
+- Inviting works end to end: refused with a readable message when there is no lobby, accepted once
+  there is (`{ ok: true, sent: 1 }`, and logged), and an empty list is rejected. Verified by
+  inviting *this* account, so nobody else was contacted
+- With a lobby up, every friend row offers Invite — including friends sitting in a closed party of
+  their own, where inviting is the useful action and joining is not on offer
+
+**Not tested, all three needing another person:** sending a real friend request, joining a real open
+party, and tapping Invite on an actual friend. Each of those puts something in somebody else's
+client, so the success paths were left alone — the routes, the validation and the error paths are
+exercised above, and the invite route itself was proven by inviting this same account.
 
 Custom lobbies and the browser, against the same live client:
 

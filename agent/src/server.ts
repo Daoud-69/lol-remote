@@ -248,6 +248,101 @@ export async function startServer(
     });
   });
 
+  /** Joins a friend's open party by id. */
+  app.post("/api/party/join", (req, res) => {
+    void run(res, async () => {
+      const partyId = String(req.body?.partyId ?? "").trim();
+      if (!partyId) throw new HttpError(400, "partyId is required.");
+      return session.joinParty(partyId);
+    });
+  });
+
+  app.post("/api/lobby/invite", (req, res) => {
+    void run(res, async () => {
+      const raw = Array.isArray(req.body?.puuids) ? req.body.puuids : [req.body?.puuid];
+      const puuids = raw.map((value: unknown) => String(value ?? "").trim()).filter(Boolean);
+      if (puuids.length === 0) throw new HttpError(400, "At least one puuid is required.");
+      const sent = await session.invite(puuids);
+      return { ok: true, sent };
+    });
+  });
+
+  // --- Friends -------------------------------------------------------------
+
+  app.get("/api/friends", (_req, res) => {
+    void run(res, async () => session.listFriends());
+  });
+
+  app.post("/api/friends", (req, res) => {
+    void run(res, async () => {
+      // Accepts either a whole Riot ID or the two halves separately, since a
+      // phone keyboard makes "Name#TAG" the natural thing to type.
+      const riotId = String(req.body?.riotId ?? "").trim();
+      let gameName = String(req.body?.gameName ?? "").trim();
+      let tagLine = String(req.body?.tagLine ?? "").trim();
+
+      if (riotId.includes("#")) {
+        const cut = riotId.lastIndexOf("#");
+        gameName = riotId.slice(0, cut).trim();
+        tagLine = riotId.slice(cut + 1).trim();
+      }
+      if (!gameName || !tagLine) {
+        throw new HttpError(400, "Give a full Riot ID, like Name#TAG.");
+      }
+
+      const who = await session.addFriend(gameName, tagLine);
+      return { ok: true, name: who };
+    });
+  });
+
+  /**
+   * The client's own friend groups (the ones its social panel lets you make),
+   * so the phone can offer the same organisation rather than inventing one.
+   */
+  app.get("/api/friend-groups", (_req, res) => {
+    void run(res, async () => session.listFriendGroups());
+  });
+
+  app.post("/api/friend-groups", (req, res) => {
+    void run(res, async () => {
+      const name = String(req.body?.name ?? "").trim();
+      if (!name) throw new HttpError(400, "Give the group a name.");
+      return session.createFriendGroup(name);
+    });
+  });
+
+  app.put("/api/friend-groups/:id", (req, res) => {
+    void run(res, async () => {
+      const id = Number(req.params.id);
+      const name = String(req.body?.name ?? "").trim();
+      if (!id) throw new HttpError(400, "A group id is required.");
+      if (!name) throw new HttpError(400, "Give the group a name.");
+      return session.renameFriendGroup(id, name);
+    });
+  });
+
+  app.delete("/api/friend-groups/:id", (req, res) => {
+    void run(res, async () => {
+      const id = Number(req.params.id);
+      if (!id) throw new HttpError(400, "A group id is required.");
+      return session.deleteFriendGroup(id);
+    });
+  });
+
+  /** Moves one friend into a group — 0 is Ungrouped, same as the client. */
+  app.post("/api/friends/:puuid/group", (req, res) => {
+    void run(res, async () => {
+      const puuid = String(req.params.puuid ?? "").trim();
+      const groupId = Number(req.body?.groupId ?? NaN);
+      if (!puuid) throw new HttpError(400, "A friend puuid is required.");
+      if (!Number.isInteger(groupId) || groupId < 0) {
+        throw new HttpError(400, "groupId must be 0 (Ungrouped) or a real group id.");
+      }
+      await session.moveFriendToGroup(puuid, groupId);
+      return { ok: true };
+    });
+  });
+
   /** The public custom lobbies. Read live — the list turns over constantly. */
   app.get("/api/custom-games", (_req, res) => {
     void run(res, async () => listCustomGames(session.getClient()));

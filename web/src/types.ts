@@ -111,6 +111,50 @@ export interface GameQueue {
   group: string;
 }
 
+/** One of the client’s own friend groups. */
+export interface FriendGroup {
+  id: number;
+  name: string;
+  priority: number;
+  collapsed: boolean;
+}
+
+/** Where a friend is, resolved by the agent from three separate LCU fields. */
+export type FriendStatus =
+  | "inGame"
+  | "championSelect"
+  | "inParty"
+  | "online"
+  | "mobile"
+  | "otherGame"
+  | "offline";
+
+/** A friend, plus the party they are advertising. */
+export interface Friend {
+  puuid: string;
+  name: string;
+  availability: string;
+  status: FriendStatus;
+  playingLeague: boolean;
+  /** What they are queued for or playing; 0 when not applicable. */
+  queueId: number;
+  queueName: string;
+  statusMessage: string;
+  profileIconId: number;
+  /** Which of the client’s friend groups they sit in. */
+  groupId: number;
+  groupName: string;
+  party: {
+    partyId: string;
+    /** Only an open party can be joined without an invite. */
+    isOpen: boolean;
+    queueId: number;
+    queueName: string;
+    players: number;
+    maxPlayers: number;
+  } | null;
+}
+
 /** A public custom lobby, as the client’s browser lists them. */
 export interface CustomGame {
   /** The only field that identifies a lobby — every row reports id: 0. */
