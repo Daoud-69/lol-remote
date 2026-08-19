@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Loader2 } from "lucide-react";
-import { api, pairingLinkFromLocation, sameConnection, type Connection } from "./lib/api";
+import { api, pairingLinkFromLocation, sameConnection, setAccountToken, type Connection } from "./lib/api";
 import type { Champion, SummonerSpell } from "./types";
 import { useAgent } from "./hooks/useAgent";
+import { useAccount } from "./hooks/useAccount";
 import { useWakeLock } from "./hooks/useWakeLock";
 import { ConnectScreen } from "./components/ConnectScreen";
 import { TopBar } from "./components/TopBar";
+import { AccountPanel } from "./components/AccountPanel";
 import { BottomNav, type Tab } from "./components/BottomNav";
 import { ReadyCheckOverlay } from "./components/ReadyCheckOverlay";
 import { Toast } from "./components/Toast";
@@ -27,6 +29,12 @@ export default function App() {
 
   const { state, status, lastAlert, clearAlert } = useAgent(connection);
   useWakeLock(state?.phase === "ChampSelect" || state?.readyCheck?.state === "InProgress");
+
+  const account = useAccount();
+  const [accountPanelOpen, setAccountPanelOpen] = useState(false);
+  useEffect(() => {
+    setAccountToken(account.session?.access_token ?? null);
+  }, [account.session]);
 
   useEffect(() => {
     let saved: Connection | null = null;
@@ -148,7 +156,12 @@ export default function App() {
 
   return (
     <div className="min-h-svh flex flex-col">
-      <TopBar status={status} onDisconnect={disconnect} />
+      <TopBar
+        status={status}
+        onDisconnect={disconnect}
+        accountSignedIn={Boolean(account.session)}
+        onOpenAccount={() => setAccountPanelOpen(true)}
+      />
 
       <div className="flex-1 max-w-6xl 2xl:max-w-[1600px] w-full mx-auto px-5 lg:px-8 py-6 pb-28 lg:pb-10">
         {state ? (
@@ -229,6 +242,16 @@ export default function App() {
       </AnimatePresence>
 
       <Toast toast={toast} />
+
+      <AccountPanel
+        visible={accountPanelOpen}
+        onClose={() => setAccountPanelOpen(false)}
+        profile={account.profile}
+        signedIn={Boolean(account.session)}
+        onSignIn={account.signIn}
+        onSignUp={account.signUp}
+        onSignOut={account.signOut}
+      />
     </div>
   );
 }

@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.112.3",
     "express": "^4.21.2",
     "qrcode": "^1.5.4",
     "ws": "^8.18.0"

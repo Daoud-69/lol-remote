@@ -463,12 +463,51 @@ on both read and write, even though the same object also carries a `secondarySty
 **Skins.** `PATCH /lol-champ-select/v1/session/my-selection` with `selectedSkinId`. The client only
 honours it after your pick is locked, which is why the skin tab tells you to lock in first.
 
+**Accounts and subscriptions.** A small, separate layer on top of everything above — an app
+account (email/password via Supabase Auth) is unrelated to pairing a phone to an agent, and most
+of the app works with no account at all. What's gated is three feature buckets: `automation`
+(ready check, roles, bans, runes, fallback spells — everything in the settings sidebar),
+`mode_picker` (switching game modes), and `friends` (invites and party joins). Manual remote
+control — accepting a match, locking a champion, setting spells by hand, starting queue — stays
+free forever; those are core "control your client from your phone" actions, not the paid value-add.
+
+The gate lives in the agent, not the UI. The web app sends the signed-in user's Supabase access
+token as `X-Account-Token` on every request; the agent (`agent/src/account.ts`) verifies it against
+Supabase and checks the account's `features` JSON before letting a gated route run, returning `402`
+with a plain-English message if it isn't unlocked. Hiding a button is a suggestion; a server that
+refuses the request is the actual gate — someone hitting the API directly gets refused all the same.
+
+The agent only ever holds Supabase's **publishable** key (`agent/src/config.ts`) — safe to embed,
+since it grants nothing by itself. Every profile read happens using the *caller's own* access
+token, so Postgres row-level security is what actually stops one account from reading another's
+subscription, not the secrecy of a key. The powerful key (`service_role`, full read/write on every
+row) exists in exactly one place: typed into `admin/index.html` by hand and kept in that browser's
+`localStorage` — never in a file, never in this repo, never shipped in a build. That tool is how
+someone's plan, expiry, and per-feature checkboxes get set by hand while there's no payment
+processor wired up yet.
+
+Two Supabase gotchas worth knowing if you're setting this up from scratch. First, Supabase now
+ships two key systems — new-style `sb_publishable_/sb_secret_` keys and the legacy anon/service_role
+JWTs. The new `sb_secret_` key works fine for the Auth Admin API but was refused with "permission
+denied" on plain table reads in testing; the admin tool needs the **legacy service_role** JWT
+specifically (API Keys → "Legacy anon, service_role API keys" tab). Second, unchecking "Automatically
+expose new tables" during project setup (sound advice for keeping a new table locked down) also
+skips the base SQL `grant` a table needs to be touched via the API *at all* — including by
+`service_role`, which normally bypasses RLS but still needs that grant to reach the table in the
+first place. Row-level security and the base grant are two separate gates; turning off the
+automatic one means writing both by hand (`agent/supabase-schema.sql`, `agent/supabase-grants.sql`).
+
 ## Security
 
 The agent binds to `0.0.0.0` so your phone can reach it, and gates every endpoint behind a six-digit
 pairing code stored in `~/.lol-remote/config.json`. That's appropriate for a home network — it stops
 a roommate poking at it, not a determined attacker on your LAN. Don't run this on public Wi-Fi. To
 rotate the code, delete `~/.lol-remote/config.json` and restart the agent.
+
+`admin/index.html` (managing accounts and subscriptions) is a standalone local tool, not part of
+any build — it's never bundled into the desktop app or the web build, and nothing in `agent/` or
+`web/` ever holds the `service_role` key it needs. Don't deploy it publicly; it's meant to be opened
+locally, by you, only.
 
 ## A note on Riot's ToS
 

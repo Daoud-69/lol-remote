@@ -1,9 +1,19 @@
-import { LogOut } from "lucide-react";
+import { LogOut, UserCircle2 } from "lucide-react";
 import type { LinkStatus } from "../hooks/useAgent";
 import { StatusDot } from "./ui/primitives";
 import leagueIcon from "../assets/league-icon.png";
 
-export function TopBar({ status, onDisconnect }: { status: LinkStatus; onDisconnect: () => void }) {
+export function TopBar({
+  status,
+  onDisconnect,
+  accountSignedIn,
+  onOpenAccount,
+}: {
+  status: LinkStatus;
+  onDisconnect: () => void;
+  accountSignedIn: boolean;
+  onOpenAccount: () => void;
+}) {
   return (
     <header className="sticky top-0 z-30 bg-obsidian border-b border-hairline">
       <div className="w-full px-5 lg:px-8 h-16 flex items-center justify-between">
@@ -25,6 +35,13 @@ export function TopBar({ status, onDisconnect }: { status: LinkStatus; onDisconn
             <StatusDot color={status === "online" ? "success" : status === "connecting" ? "gold" : "danger"} pulse={status === "connecting"} />
             {status === "online" ? "Online" : status === "connecting" ? "Connecting…" : "Offline"}
           </div>
+          <button
+            onClick={onOpenAccount}
+            className={`transition-colors ${accountSignedIn ? "text-hextech" : "text-ink-dim hover:text-ink"}`}
+            title={accountSignedIn ? "Account" : "Sign in"}
+          >
+            <UserCircle2 className="h-5 w-5" />
+          </button>
           <button onClick={onDisconnect} className="text-ink-dim hover:text-danger transition-colors" title="Disconnect">
             <LogOut className="h-4 w-4" />
           </button>

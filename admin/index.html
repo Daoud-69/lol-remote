@@ -1,0 +1,380 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>LoL Remote — Accounts</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<style>
+  :root {
+    --obsidian: #09090b;
+    --raised: #131318;
+    --card: #17171d;
+    --hextech: #0ac8b9;
+    --gold: #c89b3c;
+    --danger: #e84057;
+    --success: #22c55e;
+    --ink: #f0e6d2;
+    --ink-muted: #8fa3bf;
+    --ink-dim: #5a6f8c;
+    --hairline: rgba(255, 255, 255, 0.1);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--obsidian);
+    color: var(--ink);
+    font-family: "Segoe UI", system-ui, sans-serif;
+    min-height: 100vh;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 28px;
+    border-bottom: 1px solid var(--hairline);
+  }
+  header h1 {
+    font-size: 14px;
+    font-weight: 800;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    margin: 0;
+  }
+  header .sub {
+    color: var(--ink-dim);
+    font-size: 12px;
+    margin-top: 4px;
+  }
+  main { padding: 24px 28px 60px; max-width: 1200px; margin: 0 auto; }
+
+  #gate {
+    max-width: 420px;
+    margin: 80px auto;
+    background: var(--card);
+    border: 1px solid var(--hairline);
+    border-radius: 16px;
+    padding: 24px;
+  }
+  #gate h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.2em; color: var(--hextech); margin: 0 0 12px; }
+  #gate p { color: var(--ink-dim); font-size: 13px; line-height: 1.5; margin: 0 0 16px; }
+  input, select {
+    width: 100%;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    padding: 10px 12px;
+    color: var(--ink);
+    font-size: 13px;
+    outline: none;
+  }
+  input:focus, select:focus { border-color: rgba(10, 200, 185, 0.5); }
+  button {
+    cursor: pointer;
+    border: none;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    border-radius: 10px;
+    font-size: 12px;
+  }
+  .primary {
+    background: linear-gradient(135deg, #3fe3d4, #0ac8b9);
+    color: var(--obsidian);
+    padding: 10px 16px;
+    margin-top: 14px;
+    width: 100%;
+  }
+  .error { color: var(--danger); font-size: 12px; margin-top: 10px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th {
+    text-align: left;
+    padding: 10px 12px;
+    color: var(--ink-dim);
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    border-bottom: 1px solid var(--hairline);
+  }
+  td {
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--hairline);
+    vertical-align: middle;
+  }
+  tr:hover td { background: rgba(255, 255, 255, 0.02); }
+  .email { color: var(--ink); font-weight: 600; }
+  .tier-select { padding: 6px 8px; font-size: 12px; width: auto; }
+  .expiry-input { padding: 6px 8px; font-size: 12px; width: 150px; }
+  .checkbox-cell { text-align: center; }
+  .checkbox-cell input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: var(--hextech);
+    cursor: pointer;
+  }
+  .status-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .status-active { background: rgba(34, 197, 94, 0.12); color: var(--success); }
+  .status-inactive { background: rgba(90, 111, 140, 0.15); color: var(--ink-dim); }
+  #toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 16px; }
+  #search { max-width: 280px; }
+  #refresh { background: var(--card); color: var(--ink-muted); border: 1px solid var(--hairline); padding: 9px 14px; }
+  #refresh:hover { color: var(--ink); }
+  #savedToast {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: var(--card);
+    border: 1px solid rgba(34, 197, 94, 0.35);
+    color: var(--success);
+    padding: 10px 16px;
+    border-radius: 10px;
+    font-size: 12px;
+    font-weight: 700;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: opacity 0.2s, transform 0.2s;
+    pointer-events: none;
+  }
+  #savedToast.show { opacity: 1; transform: translateY(0); }
+  #empty { color: var(--ink-dim); padding: 40px 0; text-align: center; }
+  #logout { color: var(--ink-dim); background: none; padding: 6px 10px; }
+  #logout:hover { color: var(--danger); }
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <h2>Accounts dashboard</h2>
+  <p>Paste your Supabase <strong>service_role</strong> key (Legacy anon, service_role API keys tab). This stays on your machine — it's never sent anywhere but your own Supabase project.</p>
+  <input id="keyInput" type="password" placeholder="service_role key" />
+  <div id="gateError" class="error"></div>
+  <button class="primary" id="unlockBtn">Unlock</button>
+</div>
+
+<div id="app" style="display:none">
+  <header>
+    <div>
+      <h1>LoL Remote — Accounts</h1>
+      <div class="sub" id="countLabel"></div>
+    </div>
+    <button id="logout">Lock</button>
+  </header>
+  <main>
+    <div id="toolbar">
+      <input id="search" placeholder="Search by email…" />
+      <button id="refresh">Refresh</button>
+    </div>
+    <div id="tableWrap"></div>
+  </main>
+</div>
+
+<div id="savedToast">Saved</div>
+
+<script>
+const SUPABASE_URL = "https://rqrakcokolmcaozrcbji.supabase.co";
+// Keep in sync with agent/src/features.ts — same keys the agent checks.
+const FEATURES = [
+  { key: "automation", label: "Automation" },
+  { key: "mode_picker", label: "Mode picker" },
+  { key: "friends", label: "Friends" },
+];
+const STORAGE_KEY = "lolremote_admin_key";
+
+let SERVICE_KEY = "";
+let profiles = [];
+
+function headers() {
+  return {
+    apikey: SERVICE_KEY,
+    Authorization: "Bearer " + SERVICE_KEY,
+    "Content-Type": "application/json",
+  };
+}
+
+async function fetchProfiles() {
+  const res = await fetch(
+    SUPABASE_URL + "/rest/v1/profiles?select=id,email,subscription_tier,subscription_expires_at,features&order=created_at.desc",
+    { headers: headers() },
+  );
+  if (!res.ok) throw new Error("Request failed (" + res.status + ")");
+  return res.json();
+}
+
+async function patchProfile(id, patch) {
+  const res = await fetch(SUPABASE_URL + "/rest/v1/profiles?id=eq." + id, {
+    method: "PATCH",
+    headers: { ...headers(), Prefer: "return=minimal" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error("Save failed (" + res.status + ")");
+}
+
+function showToast() {
+  const el = document.getElementById("savedToast");
+  el.classList.add("show");
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => el.classList.remove("show"), 1400);
+}
+
+function isActive(p) {
+  return Boolean(p.subscription_expires_at) && new Date(p.subscription_expires_at) > new Date();
+}
+
+function render() {
+  const query = document.getElementById("search").value.trim().toLowerCase();
+  const rows = profiles.filter((p) => p.email.toLowerCase().includes(query));
+  document.getElementById("countLabel").textContent = profiles.length + " account" + (profiles.length === 1 ? "" : "s");
+
+  const wrap = document.getElementById("tableWrap");
+  if (rows.length === 0) {
+    wrap.innerHTML = '<div id="empty">No accounts yet — they show up here once someone signs up in the app.</div>';
+    return;
+  }
+
+  const featureHeaders = FEATURES.map((f) => "<th>" + f.label + "</th>").join("");
+  const body = rows
+    .map((p) => {
+      const active = isActive(p);
+      const featureCells = FEATURES.map((f) => {
+        const checked = Boolean(p.features && p.features[f.key]);
+        return (
+          '<td class="checkbox-cell"><input type="checkbox" ' +
+          (checked ? "checked" : "") +
+          ' data-id="' + p.id + '" data-feature="' + f.key + '" /></td>'
+        );
+      }).join("");
+
+      const expiryValue = p.subscription_expires_at ? p.subscription_expires_at.slice(0, 10) : "";
+
+      return (
+        "<tr>" +
+        '<td class="email">' + p.email + "<br/>" +
+        '<span class="status-badge ' + (active ? "status-active" : "status-inactive") + '" data-badge="' + p.id + '">' +
+        (active ? "Active" : "Inactive") + "</span></td>" +
+        '<td><select class="tier-select" data-id="' + p.id + '" data-field="subscription_tier">' +
+        ["free", "monthly", "yearly"]
+          .map((t) => '<option value="' + t + '" ' + (p.subscription_tier === t ? "selected" : "") + ">" + t + "</option>")
+          .join("") +
+        "</select></td>" +
+        '<td><input type="date" class="expiry-input" value="' + expiryValue + '" data-id="' + p.id + '" data-field="subscription_expires_at" /></td>' +
+        featureCells +
+        "</tr>"
+      );
+    })
+    .join("");
+
+  wrap.innerHTML =
+    "<table><thead><tr><th>Account</th><th>Plan</th><th>Expires</th>" +
+    featureHeaders +
+    "</tr></thead><tbody>" +
+    body +
+    "</tbody></table>";
+
+  wrap.querySelectorAll('input[type="checkbox"]').forEach((el) => {
+    el.addEventListener("change", async (event) => {
+      const id = event.target.dataset.id;
+      const key = event.target.dataset.feature;
+      const profile = profiles.find((p) => p.id === id);
+      const nextFeatures = { ...(profile.features || {}), [key]: event.target.checked };
+      profile.features = nextFeatures;
+      try {
+        await patchProfile(id, { features: nextFeatures });
+        showToast();
+      } catch (err) {
+        alert(err.message);
+      }
+    });
+  });
+
+  wrap.querySelectorAll(".tier-select").forEach((el) => {
+    el.addEventListener("change", async (event) => {
+      const id = event.target.dataset.id;
+      const value = event.target.value;
+      try {
+        await patchProfile(id, { subscription_tier: value });
+        const profile = profiles.find((p) => p.id === id);
+        profile.subscription_tier = value;
+        showToast();
+      } catch (err) {
+        alert(err.message);
+      }
+    });
+  });
+
+  wrap.querySelectorAll(".expiry-input").forEach((el) => {
+    el.addEventListener("change", async (event) => {
+      const id = event.target.dataset.id;
+      const value = event.target.value ? new Date(event.target.value + "T00:00:00Z").toISOString() : null;
+      try {
+        await patchProfile(id, { subscription_expires_at: value });
+        const profile = profiles.find((p) => p.id === id);
+        profile.subscription_expires_at = value;
+        showToast();
+        // Updates just this row's badge in place rather than re-rendering
+        // the whole table — a full render() here raced with any other field
+        // on the same row still mid-save, occasionally flashing that field
+        // back to its old value until its own save caught up.
+        const badge = wrap.querySelector('[data-badge="' + id + '"]');
+        if (badge) {
+          const active = isActive(profile);
+          badge.textContent = active ? "Active" : "Inactive";
+          badge.className = "status-badge " + (active ? "status-active" : "status-inactive");
+        }
+      } catch (err) {
+        alert(err.message);
+      }
+    });
+  });
+}
+
+async function load() {
+  try {
+    profiles = await fetchProfiles();
+    render();
+  } catch (err) {
+    document.getElementById("tableWrap").innerHTML = '<div id="empty">' + err.message + "</div>";
+  }
+}
+
+document.getElementById("unlockBtn").addEventListener("click", async () => {
+  const key = document.getElementById("keyInput").value.trim();
+  if (!key) return;
+  SERVICE_KEY = key;
+  try {
+    await fetchProfiles(); // verify the key actually works before committing to it
+    localStorage.setItem(STORAGE_KEY, key);
+    document.getElementById("gate").style.display = "none";
+    document.getElementById("app").style.display = "block";
+    load();
+  } catch (err) {
+    document.getElementById("gateError").textContent = "That key didn't work: " + err.message;
+  }
+});
+
+document.getElementById("logout").addEventListener("click", () => {
+  localStorage.removeItem(STORAGE_KEY);
+  location.reload();
+});
+
+document.getElementById("refresh").addEventListener("click", load);
+document.getElementById("search").addEventListener("input", render);
+
+// Auto-unlock if a key was saved from a previous visit.
+const saved = localStorage.getItem(STORAGE_KEY);
+if (saved) {
+  SERVICE_KEY = saved;
+  document.getElementById("gate").style.display = "none";
+  document.getElementById("app").style.display = "block";
+  load();
+}
+</script>
+</body>
+</html>

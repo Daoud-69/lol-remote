@@ -114,6 +114,16 @@ export function profileIconUrl(connection: Connection, profileIconId: number): s
 
 class ApiError extends Error {}
 
+// Set once by useAccount whenever the signed-in session changes. Threaded
+// through every request as a header rather than a parameter on every api.*
+// call — the account is app-wide state, not something each call site should
+// have to know or pass along, the same way the pairing code isn't either.
+let accountToken: string | null = null;
+
+export function setAccountToken(token: string | null): void {
+  accountToken = token;
+}
+
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -135,6 +145,7 @@ async function call<T>(connection: Connection, path: string, init?: RequestInit)
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${connection.code}`,
+        ...(accountToken ? { "X-Account-Token": accountToken } : {}),
         ...init?.headers,
       },
     },

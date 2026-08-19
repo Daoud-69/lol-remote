@@ -9,6 +9,17 @@ const CONFIG_FILE = path.join(CONFIG_DIR, "config.json");
 
 export const SERVER_PORT = Number(process.env.LOL_REMOTE_PORT ?? 8777);
 
+/**
+ * The publishable ("anon") Supabase key — safe to embed in source. It grants
+ * no access on its own; every account query the agent makes forwards the
+ * signed-in user's own access token, and Postgres row-level security is what
+ * actually restricts a request to that user's own profile row. The secret
+ * (service_role) key that bypasses RLS never appears here — it only lives in
+ * the separate admin/ tool, which is never bundled or distributed.
+ */
+export const SUPABASE_URL = "https://rqrakcokolmcaozrcbji.supabase.co";
+export const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_naP56p9Iapkkkxp5neoiKg_TmMvzS7d";
+
 interface StoredConfig {
   pairingCode: string;
   automation: AutomationSettings;

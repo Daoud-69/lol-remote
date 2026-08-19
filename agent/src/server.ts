@@ -6,6 +6,8 @@ import { WebSocketServer, WebSocket } from "ws";
 import { Session } from "./session.js";
 import { addPushToken, getPairingCode, SERVER_PORT } from "./config.js";
 import { sendPush } from "./push.js";
+import { hasFeature, verifyAccountToken, type Profile } from "./account.js";
+import type { FeatureKey } from "./features.js";
 import {
   acceptReadyCheck,
   benchSwap,
@@ -22,6 +24,16 @@ import {
 } from "./lcu/actions.js";
 import { listPages, readCatalog, recommendedPages } from "./lcu/runes.js";
 import type { PositionPreference, ServerMessage } from "./types.js";
+
+declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
+  namespace Express {
+    interface Request {
+      /** The signed-in account, if the phone sent a valid X-Account-Token. */
+      profile?: Profile | null;
+    }
+  }
+}
 
 export interface ServerHandle {
   getConnectedPhoneCount: () => number;
@@ -49,7 +61,7 @@ export async function startServer(
   // since the pairing code, not the origin, is what actually gates access.
   app.use((_req, res, next) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Account-Token");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
     next();
   });
@@ -70,6 +82,7 @@ export async function startServer(
   });
 
   app.use("/api", requirePairing);
+  app.use("/api", attachAccount);
 
   app.get("/api/state", (_req, res) => {
     res.json(session.getState());
@@ -150,7 +163,7 @@ export async function startServer(
     });
   });
 
-  app.delete("/api/runes/:championId", (req, res) => {
+  app.delete("/api/runes/:championId", requireFeature("automation"), (req, res) => {
     void run(res, async () => {
       const championId = Number(req.params.championId);
       if (!championId) throw new HttpError(400, "championId is required.");
@@ -177,7 +190,7 @@ export async function startServer(
     "UNSELECTED",
   ]);
 
-  app.post("/api/positions", (req, res) => {
+  app.post("/api/positions", requireFeature("automation"), (req, res) => {
     void run(res, async () => {
       const first = String(req.body?.first ?? "UNSELECTED").toUpperCase();
       const second = String(req.body?.second ?? "UNSELECTED").toUpperCase();
@@ -214,7 +227,7 @@ export async function startServer(
     });
   });
 
-  app.post("/api/queue", (req, res) => {
+  app.post("/api/queue", requireFeature("mode_picker"), (req, res) => {
     void run(res, async () => {
       const queueId = Number(req.body?.queueId);
       if (!queueId) throw new HttpError(400, "queueId is required.");
@@ -223,7 +236,7 @@ export async function startServer(
   });
 
   /** Practice Tool and the custom presets, which need a whole config, not an id. */
-  app.post("/api/custom", (req, res) => {
+  app.post("/api/custom", requireFeature("mode_picker"), (req, res) => {
     void run(res, async () => {
       const queueId = Number(req.body?.queueId);
       if (!queueId) throw new HttpError(400, "queueId is required.");
@@ -249,7 +262,7 @@ export async function startServer(
   });
 
   /** Joins a friend's open party by id. */
-  app.post("/api/party/join", (req, res) => {
+  app.post("/api/party/join", requireFeature("friends"), (req, res) => {
     void run(res, async () => {
       const partyId = String(req.body?.partyId ?? "").trim();
       if (!partyId) throw new HttpError(400, "partyId is required.");
@@ -257,7 +270,7 @@ export async function startServer(
     });
   });
 
-  app.post("/api/lobby/invite", (req, res) => {
+  app.post("/api/lobby/invite", requireFeature("friends"), (req, res) => {
     void run(res, async () => {
       const raw = Array.isArray(req.body?.puuids) ? req.body.puuids : [req.body?.puuid];
       const puuids = raw.map((value: unknown) => String(value ?? "").trim()).filter(Boolean);
@@ -273,7 +286,7 @@ export async function startServer(
     void run(res, async () => session.listFriends());
   });
 
-  app.post("/api/friends", (req, res) => {
+  app.post("/api/friends", requireFeature("friends"), (req, res) => {
     void run(res, async () => {
       // Accepts either a whole Riot ID or the two halves separately, since a
       // phone keyboard makes "Name#TAG" the natural thing to type.
@@ -303,7 +316,7 @@ export async function startServer(
     void run(res, async () => session.listFriendGroups());
   });
 
-  app.post("/api/friend-groups", (req, res) => {
+  app.post("/api/friend-groups", requireFeature("friends"), (req, res) => {
     void run(res, async () => {
       const name = String(req.body?.name ?? "").trim();
       if (!name) throw new HttpError(400, "Give the group a name.");
@@ -311,7 +324,7 @@ export async function startServer(
     });
   });
 
-  app.put("/api/friend-groups/:id", (req, res) => {
+  app.put("/api/friend-groups/:id", requireFeature("friends"), (req, res) => {
     void run(res, async () => {
       const id = Number(req.params.id);
       const name = String(req.body?.name ?? "").trim();
@@ -321,7 +334,7 @@ export async function startServer(
     });
   });
 
-  app.delete("/api/friend-groups/:id", (req, res) => {
+  app.delete("/api/friend-groups/:id", requireFeature("friends"), (req, res) => {
     void run(res, async () => {
       const id = Number(req.params.id);
       if (!id) throw new HttpError(400, "A group id is required.");
@@ -330,7 +343,7 @@ export async function startServer(
   });
 
   /** Moves one friend into a group — 0 is Ungrouped, same as the client. */
-  app.post("/api/friends/:puuid/group", (req, res) => {
+  app.post("/api/friends/:puuid/group", requireFeature("friends"), (req, res) => {
     void run(res, async () => {
       const puuid = String(req.params.puuid ?? "").trim();
       const groupId = Number(req.body?.groupId ?? NaN);
@@ -348,7 +361,7 @@ export async function startServer(
     void run(res, async () => listCustomGames(session.getClient()));
   });
 
-  app.post("/api/custom-games/join", (req, res) => {
+  app.post("/api/custom-games/join", requireFeature("mode_picker"), (req, res) => {
     void run(res, async () => {
       const partyId = String(req.body?.partyId ?? "");
       if (!partyId) throw new HttpError(400, "partyId is required.");
@@ -359,7 +372,7 @@ export async function startServer(
     });
   });
 
-  app.delete("/api/queue", (_req, res) => {
+  app.delete("/api/queue", requireFeature("mode_picker"), (_req, res) => {
     void run(res, async () => {
       await session.leaveQueue();
       return { ok: true };
@@ -502,7 +515,7 @@ export async function startServer(
     });
   });
 
-  app.post("/api/automation", (req, res) => {
+  app.post("/api/automation", requireFeature("automation"), (req, res) => {
     void run(res, async () => session.updateAutomation(req.body ?? {}));
   });
 
@@ -584,6 +597,34 @@ function requirePairing(req: Request, res: Response, next: NextFunction): void {
     return;
   }
   next();
+}
+
+/**
+ * Looks up the signed-in account for this request, if any, and attaches it —
+ * absent or invalid tokens just leave req.profile unset rather than
+ * rejecting outright, since most routes don't require an account at all.
+ */
+function attachAccount(req: Request, _res: Response, next: NextFunction): void {
+  const token = req.header("x-account-token");
+  if (!token) {
+    next();
+    return;
+  }
+  void verifyAccountToken(token).then((profile) => {
+    req.profile = profile;
+    next();
+  });
+}
+
+/** Gates a route behind a subscribed feature — 402 rather than 403, since the fix is paying, not permissions. */
+function requireFeature(key: FeatureKey) {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    if (!hasFeature(req.profile ?? null, key)) {
+      res.status(402).json({ error: "This needs an active subscription with that feature unlocked." });
+      return;
+    }
+    next();
+  };
 }
 
 /** Runs a handler, mapping thrown errors to a message the phone can display. */
