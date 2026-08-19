@@ -50,4 +50,10 @@
          and typing the address in still works without any camera at all. -->
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+
+    <!-- Android 13+ will not show a notification without this granted at
+         runtime; the app asks when you turn notifications on. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Lets the alarm and its notification arrive with the screen off. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
 </manifest>

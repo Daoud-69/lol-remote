@@ -279,5 +279,9 @@ export interface AgentState {
 
 export type ServerMessage =
   | { type: "state"; state: AgentState }
-  | { type: "alert"; kind: "ready-check" | "pick-turn" | "ban-turn"; message: string }
+  | {
+      type: "alert";
+      kind: "ready-check" | "pick-turn" | "ban-turn" | "game-start";
+      message: string;
+    }
   | { type: "error"; message: string };

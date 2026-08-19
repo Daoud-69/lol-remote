@@ -1,7 +1,8 @@
 import { useCallback, useState } from "react";
-import { ChevronRight, Sparkles } from "lucide-react";
+import { BellRing, ChevronRight, Sparkles } from "lucide-react";
 import { api, championIconUrl, spellIconUrl, type Connection } from "../../lib/api";
 import { useAutomation } from "../../hooks/useAutomation";
+import type { useAlerts } from "../../hooks/useAlerts";
 import {
   POSITIONS,
   type AgentState,
@@ -35,12 +36,14 @@ export function AutomationPanel({
   champions,
   spells,
   onToast,
+  alerts,
 }: {
   state: AgentState;
   connection: Connection;
   champions: Champion[];
   spells: SummonerSpell[];
   onToast: (message: string, kind: "ok" | "error") => void;
+  alerts: ReturnType<typeof useAlerts>;
 }) {
   const onError = useCallback((message: string) => onToast(message, "error"), [onToast]);
   const [settings, update] = useAutomation(state.automation, connection, onError);
@@ -124,6 +127,57 @@ export function AutomationPanel({
             <Muted>A delay leaves you a window to decline from the phone.</Muted>
           </div>
         )}
+      </Card>
+
+      <Card>
+        <SectionTitle accent="danger">Alarm</SectionTitle>
+        <Muted>Rings the phone, so you can be across the room.</Muted>
+
+        <ToggleRow
+          label="Ring when the game starts"
+          help="The moment you need to be back at the PC."
+          value={alerts.prefs.gameStart}
+          onChange={(v) => alerts.setPrefs((p) => ({ ...p, gameStart: v }))}
+        />
+        <ToggleRow
+          label="Ring when a match is found"
+          help="Useful mainly with auto-accept off."
+          value={alerts.prefs.readyCheck}
+          onChange={(v) => alerts.setPrefs((p) => ({ ...p, readyCheck: v }))}
+        />
+        <ToggleRow
+          label="Chirp on your pick or ban turn"
+          help="Quieter, for when you are already watching."
+          value={alerts.prefs.turn}
+          onChange={(v) => alerts.setPrefs((p) => ({ ...p, turn: v }))}
+        />
+        <ToggleRow
+          label="Show a notification"
+          help="Reaches you with the app closed or the screen off."
+          value={alerts.prefs.notifications}
+          onChange={(v) => {
+            if (v && !alerts.canNotify) {
+              void alerts.requestNotifications().then((granted) => {
+                if (!granted) onToast("Notifications are blocked in your settings.", "error");
+              });
+              return;
+            }
+            alerts.setPrefs((p) => ({ ...p, notifications: v }));
+          }}
+        />
+
+        <button
+          type="button"
+          onClick={() => alerts.test("game-start")}
+          className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-hairline bg-white/[0.04] py-2.5 text-xs font-bold uppercase tracking-wider text-ink-muted transition-colors hover:border-white/25 hover:text-ink"
+        >
+          <BellRing className="h-4 w-4" />
+          Test the alarm
+        </button>
+        <Muted>
+          Phones stay silent until you have tapped the screen at least once, so test it here rather
+          than finding out mid-queue.
+        </Muted>
       </Card>
 
       <RolePicker lobby={state.lobby} connection={connection} onToast={onToast} />

@@ -166,11 +166,25 @@ export class Session extends EventEmitter {
   private async onLcuEvent(event: LcuEvent): Promise<void> {
     try {
       if (event.uri === "/lol-gameflow/v1/gameflow-phase") {
+        const previous = this.state.phase;
         this.state.phase = (event.data as GameflowPhase) ?? "None";
         if (this.state.phase !== "ChampSelect") {
           this.state.champSelect = null;
           this.resetChampSelectFlags();
         }
+
+        // The moment the client stops being something you can drive from the
+        // phone and starts being something you have to be sat at the keyboard
+        // for. Fired once on the transition, not on every phase republish.
+        if (this.state.phase === "GameStart" && previous !== "GameStart") {
+          this.emit("alert", {
+            type: "alert",
+            kind: "game-start",
+            message: "Game starting — get to your PC.",
+          } satisfies ServerMessage);
+          this.log("Game is starting.");
+        }
+
         this.publish();
         return;
       }

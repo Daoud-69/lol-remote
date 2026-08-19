@@ -4,9 +4,19 @@ import { socketUrl, type Connection } from "../lib/api";
 
 export type LinkStatus = "connecting" | "online" | "offline";
 
+export type AlertKind = "ready-check" | "pick-turn" | "ban-turn" | "game-start";
+
+export interface AgentAlert {
+  kind: AlertKind;
+  message: string;
+  /** Distinguishes two identical alerts, so repeats still trigger. */
+  at: number;
+}
+
 interface AgentHook {
   state: AgentState | null;
   status: LinkStatus;
+  alert: AgentAlert | null;
   lastAlert: string | null;
   clearAlert: () => void;
   reconnect: () => void;
@@ -21,7 +31,7 @@ interface AgentHook {
 export function useAgent(connection: Connection | null): AgentHook {
   const [state, setState] = useState<AgentState | null>(null);
   const [status, setStatus] = useState<LinkStatus>("offline");
-  const [lastAlert, setLastAlert] = useState<string | null>(null);
+  const [alert, setAlert] = useState<AgentAlert | null>(null);
 
   const socketRef = useRef<WebSocket | null>(null);
   const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -53,9 +63,10 @@ export function useAgent(connection: Connection | null): AgentHook {
       if (message.type === "state") {
         setState(message.state);
       } else if (message.type === "alert") {
-        setLastAlert(message.message);
+        setAlert({ kind: message.kind, message: message.message, at: Date.now() });
         if (typeof navigator !== "undefined" && navigator.vibrate) {
-          navigator.vibrate(message.kind === "ready-check" ? [400, 200, 400, 200, 400] : [150, 100, 150]);
+          const urgent = message.kind === "ready-check" || message.kind === "game-start";
+          navigator.vibrate(urgent ? [400, 200, 400, 200, 400] : [150, 100, 150]);
         }
       }
     };
@@ -96,8 +107,9 @@ export function useAgent(connection: Connection | null): AgentHook {
   return {
     state,
     status,
-    lastAlert,
-    clearAlert: () => setLastAlert(null),
+    alert,
+    lastAlert: alert?.message ?? null,
+    clearAlert: () => setAlert(null),
     reconnect,
   };
 }

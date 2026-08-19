@@ -4,11 +4,13 @@ import { Loader2 } from "lucide-react";
 import { api, pairingLinkFromLocation, sameConnection, type Connection } from "./lib/api";
 import type { Champion, SummonerSpell } from "./types";
 import { useAgent } from "./hooks/useAgent";
+import { useAlerts } from "./hooks/useAlerts";
 import { useWakeLock } from "./hooks/useWakeLock";
 import { ConnectScreen } from "./components/ConnectScreen";
 import { TopBar } from "./components/TopBar";
 import { BottomNav, type Tab } from "./components/BottomNav";
 import { ReadyCheckOverlay } from "./components/ReadyCheckOverlay";
+import { AlarmBanner } from "./components/AlarmBanner";
 import { Toast } from "./components/Toast";
 import { StatusPanel } from "./components/panels/StatusPanel";
 import { ChampSelectPanel } from "./components/panels/ChampSelectPanel";
@@ -25,8 +27,22 @@ export default function App() {
   const [champions, setChampions] = useState<Champion[]>([]);
   const [spells, setSpells] = useState<SummonerSpell[]>([]);
 
-  const { state, status, lastAlert, clearAlert } = useAgent(connection);
+  const { state, status, alert, lastAlert, clearAlert } = useAgent(connection);
+  const alerts = useAlerts(alert);
   useWakeLock(state?.phase === "ChampSelect" || state?.readyCheck?.state === "InProgress");
+
+  // Browsers will not let a page make noise until it has seen a real gesture,
+  // and a queue popping is not one. Any tap counts, so listen once at the root
+  // rather than making the user find a button labelled "enable sound".
+  useEffect(() => {
+    const arm = () => alerts.armFromGesture();
+    window.addEventListener("pointerdown", arm);
+    window.addEventListener("keydown", arm);
+    return () => {
+      window.removeEventListener("pointerdown", arm);
+      window.removeEventListener("keydown", arm);
+    };
+  }, [alerts]);
 
   useEffect(() => {
     let saved: Connection | null = null;
@@ -155,7 +171,7 @@ export default function App() {
           <div className="lg:grid lg:grid-cols-[340px_1fr] lg:gap-8 lg:items-start">
             {/* Desktop sidebar: settings live here, always visible. */}
             <aside className="hidden lg:block sticky top-22">
-              <AutomationPanel state={state} connection={connection} champions={champions} spells={spells} onToast={showToast} />
+              <AutomationPanel state={state} connection={connection} champions={champions} spells={spells} onToast={showToast} alerts={alerts} />
             </aside>
 
             {/* Desktop main column: live visualizer, auto-switches to champ select. */}
@@ -191,7 +207,7 @@ export default function App() {
                 )}
                 {tab === "auto" && (
                   <motion.div key="auto" initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 12 }} transition={{ duration: 0.25 }}>
-                    <AutomationPanel state={state} connection={connection} champions={champions} spells={spells} onToast={showToast} />
+                    <AutomationPanel state={state} connection={connection} champions={champions} spells={spells} onToast={showToast} alerts={alerts} />
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -205,6 +221,8 @@ export default function App() {
       </div>
 
       <BottomNav tab={tab} onChange={setTab} />
+
+      <AlarmBanner kind={alerts.ringing} onSilence={alerts.silence} />
 
       <ReadyCheckOverlay
         visible={Boolean(readyCheckPending)}
