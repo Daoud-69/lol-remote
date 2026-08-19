@@ -54,6 +54,13 @@ import { loadAutomation, saveAutomation } from "./config.js";
  */
 const MAX_ACTION_ATTEMPTS = 4;
 
+/**
+ * Phases that mean the game itself is up — the loading screen and everything
+ * after it. GameStart is transitional and easy to miss; InProgress is the one
+ * that always shows up, including after a reconnect.
+ */
+const IN_GAME_PHASES = new Set<GameflowPhase>(["GameStart", "InProgress", "Reconnect"]);
+
 const TOPICS = [
   "OnJsonApiEvent_lol-gameflow_v1_gameflow-phase",
   "OnJsonApiEvent_lol-matchmaking_v1_ready-check",
@@ -75,6 +82,8 @@ export class Session extends EventEmitter {
   private automationAttempts = new Map<number, number>();
   /** Action we have already reported as having no legal choice left. */
   private exhaustedListForActionId: number | null = null;
+  /** Latches once a game is under way, so the alarm rings once per game. */
+  private alarmedForGame = false;
   private spellsAppliedForSession = false;
   private declaredForSession = false;
   /** Champion whose runes we already pushed, so a re-render does not re-apply. */
@@ -175,14 +184,27 @@ export class Session extends EventEmitter {
 
         // The moment the client stops being something you can drive from the
         // phone and starts being something you have to be sat at the keyboard
-        // for. Fired once on the transition, not on every phase republish.
-        if (this.state.phase === "GameStart" && previous !== "GameStart") {
-          this.emit("alert", {
-            type: "alert",
-            kind: "game-start",
-            message: "Game starting — get to your PC.",
-          } satisfies ServerMessage);
-          this.log("Game is starting.");
+        // for.
+        //
+        // Two phases qualify, and which one you actually see is not
+        // guaranteed: GameStart is a brief hop that a quick machine can pass
+        // through between event publishes, and a reconnect goes straight to
+        // InProgress without it. So ring on whichever arrives first — that is
+        // the loading screen either way — and latch it, since ringing twice
+        // seconds apart is worse than ringing late.
+        if (IN_GAME_PHASES.has(this.state.phase)) {
+          if (!this.alarmedForGame) {
+            this.alarmedForGame = true;
+            this.emit("alert", {
+              type: "alert",
+              kind: "game-start",
+              message: "Game starting — get to your PC.",
+            } satisfies ServerMessage);
+            this.log("Game is starting.");
+          }
+        } else if (previous !== this.state.phase) {
+          // Back out of a game, so the next one may ring again.
+          this.alarmedForGame = false;
         }
 
         this.publish();
