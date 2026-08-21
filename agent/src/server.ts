@@ -27,6 +27,7 @@ import { RUNE_SOURCES } from "./runeSource.js";
 import type {
   LobbySlotPatch,
   PositionPreference,
+  RunePage,
   ServerMessage,
   SwapAction,
   SwapKind,
@@ -544,6 +545,27 @@ export async function startServer(
       }
       if (req.body?.spell1Id !== undefined) patch.spell1Id = Number(req.body.spell1Id);
       if (req.body?.spell2Id !== undefined) patch.spell2Id = Number(req.body.spell2Id);
+      if (req.body?.skinId !== undefined) {
+        const skinId = Number(req.body.skinId);
+        if (!Number.isInteger(skinId) || skinId < 0) throw new HttpError(400, "skinId must be a skin.");
+        patch.skinId = skinId;
+      }
+      if (req.body?.perks !== undefined) {
+        const perks = req.body.perks as Partial<RunePage>;
+        const ids = perks?.selectedPerkIds;
+        // Nine is not a style choice — it is keystone, three primary minors,
+        // two secondary minors and three shards. A page of any other length is
+        // one the client will refuse after this has already overwritten a good
+        // one, so it is refused here instead.
+        if (!Array.isArray(ids) || ids.length !== 9 || !perks?.primaryStyleId) {
+          throw new HttpError(400, "A rune page needs two styles and exactly 9 perks.");
+        }
+        patch.perks = {
+          primaryStyleId: Number(perks.primaryStyleId),
+          secondaryStyleId: Number(perks.secondaryStyleId ?? 0),
+          selectedPerkIds: ids.map(Number),
+        };
+      }
 
       if (Object.keys(patch).length === 0) {
         throw new HttpError(400, "Nothing to change.");

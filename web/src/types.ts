@@ -202,8 +202,7 @@ export interface CustomGame {
 
 /**
  * One of Swiftplay's pre-picked champions, chosen in the lobby rather than in
- * champ select. The slot's rune page is deliberately not in this contract —
- * nothing here edits it, and the agent preserves it across a write.
+ * champ select — a whole loadout, not just a champion.
  */
 export interface LobbySlot {
   championId: number;
@@ -212,6 +211,8 @@ export interface LobbySlot {
   spell1Id: number;
   spell2Id: number;
   skinId: number;
+  /** The slot's rune page, re-spelled by the agent into champ select's shape. */
+  perks: RunePage | null;
 }
 
 export interface LobbyPositions {

@@ -8,6 +8,7 @@ import type {
   GameQueue,
   LobbyPositions,
   LobbySlot,
+  RunePage,
   PositionPreference,
   RecommendedRunePage,
   RuneCatalog,
@@ -201,7 +202,14 @@ export const api = {
   setLobbySlot: (
     c: Connection,
     index: number,
-    patch: { championId?: number; positionPreference?: string; spell1Id?: number; spell2Id?: number },
+    patch: {
+      championId?: number;
+      positionPreference?: string;
+      spell1Id?: number;
+      spell2Id?: number;
+      skinId?: number;
+      perks?: RunePage;
+    },
   ) => post<{ ok: true; slots: LobbySlot[] }>(c, "/api/lobby/slot", { index, ...patch }),
 
   swap: (c: Connection, kind: SwapKind, id: number, action: SwapAction) =>

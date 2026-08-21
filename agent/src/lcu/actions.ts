@@ -7,6 +7,7 @@ import type {
   LobbySlotPatch,
   MyAction,
   PositionPreference,
+  RunePage,
   SwapAction,
   SwapKind,
   TeammateSlot,
@@ -106,9 +107,9 @@ interface RawLobbyMember {
  * A Swiftplay slot exactly as the client stores it.
  *
  * `perks` is a JSON string rather than an object — the same shape the friends
- * list uses for party data — and is carried around untouched rather than
- * parsed, since nothing here edits a slot's runes and re-encoding a string we
- * did not need to read is only a way to corrupt it.
+ * list uses for party data — so it is decoded on the way out and re-encoded on
+ * the way in, and a slot the phone does not touch keeps the exact string the
+ * client gave us rather than a round-tripped copy of it.
  */
 interface RawPlayerSlot {
   championId: number;
@@ -127,6 +128,45 @@ interface RawLobby {
 const PLAYER_SLOTS = "/lol-lobby/v1/lobby/members/localMember/player-slots";
 
 /**
+ * The lobby's own spelling of a rune page, which is not champ select's.
+ *
+ * Same nine perks and two styles, different field names and wrapped in a
+ * string. Translating at this boundary is what lets the phone reuse the editor
+ * it already has rather than learn a second shape for the same thing.
+ */
+interface RawSlotPerks {
+  perkIds: number[];
+  perkStyle: number;
+  perkSubStyle: number;
+}
+
+function decodePerks(raw: string): RunePage | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<RawSlotPerks>;
+    const selectedPerkIds = parsed.perkIds ?? [];
+    if (!Array.isArray(selectedPerkIds) || selectedPerkIds.length === 0) return null;
+    return {
+      primaryStyleId: parsed.perkStyle ?? 0,
+      secondaryStyleId: parsed.perkSubStyle ?? 0,
+      selectedPerkIds,
+    };
+  } catch {
+    // Somebody else's JSON; a slot with an unreadable page is better reported
+    // as having none than as a half-built one the editor would then write back.
+    return null;
+  }
+}
+
+function encodePerks(page: RunePage): string {
+  return JSON.stringify({
+    perkIds: page.selectedPerkIds,
+    perkStyle: page.primaryStyleId,
+    perkSubStyle: page.secondaryStyleId,
+  } satisfies RawSlotPerks);
+}
+
+/**
  * Changes one Swiftplay slot, leaving the others and the untouched fields alone.
  *
  * The client only accepts the whole array, so the current slots are read back
@@ -137,7 +177,27 @@ const PLAYER_SLOTS = "/lol-lobby/v1/lobby/members/localMember/player-slots";
  * belongs to champion 36), so leaving the old one attached would ask the client
  * for a skin that champion does not have. The base skin is `championId * 1000`.
  */
-export async function updatePlayerSlot(
+export function updatePlayerSlot(
+  lcu: LcuClient,
+  index: number,
+  patch: LobbySlotPatch,
+): Promise<LobbySlot[]> {
+  // Serialised, because this is read-modify-write over the whole array and the
+  // client is the only copy. Two taps in quick succession — champion, then
+  // skin — otherwise have the second read the slots before the first's write
+  // lands and put the stale value back, silently undoing it. Observed exactly
+  // that: a role change reverted by a rune change sent a moment later.
+  slotWrites = slotWrites.then(
+    () => writePlayerSlot(lcu, index, patch),
+    () => writePlayerSlot(lcu, index, patch),
+  );
+  return slotWrites;
+}
+
+/** Tail of the write chain; a rejection must not poison the ones behind it. */
+let slotWrites: Promise<LobbySlot[]> = Promise.resolve([]);
+
+async function writePlayerSlot(
   lcu: LcuClient,
   index: number,
   patch: LobbySlotPatch,
@@ -149,18 +209,58 @@ export async function updatePlayerSlot(
 
   const current = slots[index];
   const championId = patch.championId ?? current.championId;
+  const changedChampion = championId !== current.championId;
+  const position = patch.positionPreference ?? current.positionPreference;
+
+  // A page belonging to the champion who just left the slot is legal but
+  // wrong — Grasp on a mage is not what anyone meant by "keep my runes". When
+  // the champion changes and no page was sent, take the client's own
+  // recommendation for whoever moved in, which is what its UI does. Failing
+  // that, keeping the old page still beats sending an empty one.
+  let perks = patch.perks ? encodePerks(patch.perks) : current.perks;
+  if (!patch.perks && changedChampion) {
+    perks = (await recommendedSlotPerks(lcu, championId, position)) ?? current.perks;
+  }
+
   const next: RawPlayerSlot = {
     ...current,
     championId,
-    skinId: championId === current.championId ? current.skinId : championId * 1000,
-    positionPreference: patch.positionPreference ?? current.positionPreference,
+    skinId: patch.skinId ?? (changedChampion ? championId * 1000 : current.skinId),
+    positionPreference: position,
     spell1: patch.spell1Id ?? current.spell1,
     spell2: patch.spell2Id ?? current.spell2,
+    perks,
   };
 
   const updated = slots.map((slot, at) => (at === index ? next : slot));
   await lcu.request("PUT", PLAYER_SLOTS, updated);
   return updated.map(toLobbySlot);
+}
+
+/** The client's own suggestion for a champion, encoded for a slot. Null if it has none. */
+async function recommendedSlotPerks(
+  lcu: LcuClient,
+  championId: number,
+  position: string,
+): Promise<string | null> {
+  try {
+    const pages = await lcu.get<{ perks?: { id: number }[]; primaryPerkStyleId?: number; secondaryPerkStyleId?: number; position?: string }[]>(
+      `/lol-perks/v1/recommended-pages/champion/${championId}/position/${position || "NONE"}/map/11`,
+    );
+    const exact = position
+      ? pages.find((page) => (page.position ?? "").toUpperCase() === position.toUpperCase())
+      : undefined;
+    const chosen = exact ?? pages[0];
+    const ids = (chosen?.perks ?? []).map((perk) => perk.id);
+    if (ids.length === 0 || !chosen?.primaryPerkStyleId) return null;
+    return encodePerks({
+      primaryStyleId: chosen.primaryPerkStyleId,
+      secondaryStyleId: chosen.secondaryPerkStyleId ?? 0,
+      selectedPerkIds: ids,
+    });
+  } catch {
+    return null;
+  }
 }
 
 function toLobbySlot(slot: RawPlayerSlot): LobbySlot {
@@ -170,6 +270,7 @@ function toLobbySlot(slot: RawPlayerSlot): LobbySlot {
     spell1Id: slot.spell1 ?? 0,
     spell2Id: slot.spell2 ?? 0,
     skinId: slot.skinId ?? 0,
+    perks: decodePerks(slot.perks ?? ""),
   };
 }
 

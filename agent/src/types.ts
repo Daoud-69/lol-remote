@@ -202,6 +202,17 @@ export interface LobbySlot {
   spell1Id: number;
   spell2Id: number;
   skinId: number;
+  /**
+   * The slot's rune page, re-spelled into the same shape champ select uses.
+   *
+   * The client stores it as a JSON string under different field names
+   * (`perkStyle`, `perkSubStyle`, `perkIds`), which is a detail of how a lobby
+   * happens to serialise things rather than something worth exporting — the
+   * phone already has an editor for `RunePage`, and it should not need a second
+   * one to edit the same nine perks. Null when the slot has no page or the
+   * string does not parse.
+   */
+  perks: RunePage | null;
 }
 
 /** What the phone may change about one slot; anything omitted is left alone. */
@@ -210,6 +221,8 @@ export interface LobbySlotPatch {
   positionPreference?: string;
   spell1Id?: number;
   spell2Id?: number;
+  skinId?: number;
+  perks?: RunePage;
 }
 
 export interface LobbyPositions {
