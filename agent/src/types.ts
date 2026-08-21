@@ -48,6 +48,46 @@ export interface TeammateSlot {
   isLocalPlayer: boolean;
 }
 
+/**
+ * Which of the two things a swap trades. The client models them identically —
+ * same contract, same four verbs — and differs only in the route segment.
+ */
+export type SwapKind = "position" | "pickOrder";
+
+/**
+ * Where a swap has got to, spelled as the client spells it.
+ *
+ * Only three of these are worth a button. `AVAILABLE` is an offer you could
+ * make, `SENT` is one you are waiting on, and `RECEIVED` is the one that
+ * matters most — a teammate is asking you, and it expires. The rest are either
+ * settled (`ACCEPTED`, `DECLINED`, `CANCELLED`) or not offerable (`BUSY` while
+ * that player is mid-swap with someone else, `INVALID` where the trade makes
+ * no sense), and all of them are reported rather than filtered so the phone
+ * can say why a teammate is not swappable instead of silently omitting them.
+ */
+export type SwapState =
+  | "AVAILABLE"
+  | "SENT"
+  | "RECEIVED"
+  | "BUSY"
+  | "INVALID"
+  | "ACCEPTED"
+  | "DECLINED"
+  | "CANCELLED";
+
+/** One possible trade with one teammate. */
+export interface TeamSwap {
+  /** What the request/accept/decline/cancel routes are keyed by. */
+  id: number;
+  /** The teammate on the other side, matched against `myTeam`. */
+  cellId: number;
+  state: SwapState;
+  kind: SwapKind;
+}
+
+/** The four things you can do to a swap, and the route segment each maps to. */
+export type SwapAction = "request" | "accept" | "decline" | "cancel";
+
 export interface ChampSelectState {
   phase: string;
   timeLeftMs: number;
@@ -62,6 +102,8 @@ export interface ChampSelectState {
   myTeam: TeammateSlot[];
   theirTeam: TeammateSlot[];
   bans: { myTeamBans: number[]; theirTeamBans: number[] };
+  /** Role and pick-order trades with teammates, both kinds in one list. */
+  swaps: TeamSwap[];
   /** Uppercased role the client assigned us, "" in modes without roles. */
   myAssignedPosition: string;
   /**

@@ -16,12 +16,29 @@ import {
   resolveAction,
   setSkin,
   setSpells,
+  respondToSwap,
   setWardSkin,
   startQueue,
   stopQueue,
 } from "./lcu/actions.js";
 import { listPages, readCatalog, recommendedPages } from "./lcu/runes.js";
 import { RUNE_SOURCES } from "./runeSource.js";
+import type { SwapAction, SwapKind } from "./types.js";
+
+const SWAP_ACTIONS: SwapAction[] = ["request", "accept", "decline", "cancel"];
+
+/** Log lines read as sentences rather than as the verb the route was called with. */
+const SWAP_VERB: Record<SwapAction, string> = {
+  request: "Asked for",
+  accept: "Accepted",
+  decline: "Declined",
+  cancel: "Withdrew",
+};
+
+const SWAP_NOUN: Record<SwapKind, string> = {
+  position: "role",
+  pickOrder: "pick order",
+};
 import type { PositionPreference, ServerMessage } from "./types.js";
 
 export interface ServerHandle {
@@ -492,6 +509,40 @@ export async function startServer(
       session.log(
         `Swapped to ${session.getGameData().championName(championId)} from the bench.`,
       );
+      await session.refreshAll();
+      return { ok: true };
+    });
+  });
+
+  /**
+   * One route for both kinds and all four verbs, because the client models them
+   * that way — the swap's own id identifies the teammate and the kind, so there
+   * is nothing else to send.
+   */
+  app.post("/api/swap", (req, res) => {
+    void run(res, async () => {
+      const kind = String(req.body?.kind ?? "");
+      const action = String(req.body?.action ?? "");
+      const id = Number(req.body?.id);
+
+      if (kind !== "position" && kind !== "pickOrder") {
+        throw new HttpError(400, "kind must be 'position' or 'pickOrder'.");
+      }
+      if (!SWAP_ACTIONS.includes(action as SwapAction)) {
+        throw new HttpError(400, "action must be request, accept, decline or cancel.");
+      }
+      if (!Number.isInteger(id) || id < 0) throw new HttpError(400, "id is required.");
+
+      // The swap has to be one the client is currently offering. Without this a
+      // stale phone could accept a request that has already expired, and the
+      // client's own error for that says nothing worth showing.
+      const swap = session.getState().champSelect?.swaps.find(
+        (candidate) => candidate.id === id && candidate.kind === kind,
+      );
+      if (!swap) throw new HttpError(409, "That swap is no longer on offer.");
+
+      await respondToSwap(session.getClient(), kind, id, action as SwapAction);
+      session.log(`${SWAP_VERB[action as SwapAction]} a ${SWAP_NOUN[kind]} swap.`);
       await session.refreshAll();
       return { ok: true };
     });

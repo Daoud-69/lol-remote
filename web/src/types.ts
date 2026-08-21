@@ -40,6 +40,34 @@ export interface TeammateSlot {
   isLocalPlayer: boolean;
 }
 
+/** Role trades and pick-order trades: same contract, different route segment. */
+export type SwapKind = "position" | "pickOrder";
+
+/**
+ * Where a swap has got to. Only three are worth a button — `AVAILABLE` is an
+ * offer you could make, `SENT` one you are waiting on, and `RECEIVED` a
+ * teammate asking you.
+ */
+export type SwapState =
+  | "AVAILABLE"
+  | "SENT"
+  | "RECEIVED"
+  | "BUSY"
+  | "INVALID"
+  | "ACCEPTED"
+  | "DECLINED"
+  | "CANCELLED";
+
+export interface TeamSwap {
+  id: number;
+  /** The teammate on the other side, matched against `myTeam`. */
+  cellId: number;
+  state: SwapState;
+  kind: SwapKind;
+}
+
+export type SwapAction = "request" | "accept" | "decline" | "cancel";
+
 export interface ChampSelectState {
   phase: string;
   timeLeftMs: number;
@@ -50,6 +78,8 @@ export interface ChampSelectState {
   myTeam: TeammateSlot[];
   theirTeam: TeammateSlot[];
   bans: { myTeamBans: number[]; theirTeamBans: number[] };
+  /** Role and pick-order trades with teammates, both kinds in one list. */
+  swaps: TeamSwap[];
   myAssignedPosition: string;
   autofilled: boolean;
   benchEnabled: boolean;

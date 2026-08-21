@@ -2,7 +2,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Ban, Sword } from "lucide-react";
 import { api, championIconUrl, skinSplashUrl, type Connection } from "../../lib/api";
-import type { AgentState, Champion, Skin, SummonerSpell, TeammateSlot } from "../../types";
+import type {
+  AgentState,
+  Champion,
+  Skin,
+  SummonerSpell,
+  SwapAction,
+  SwapKind,
+  TeammateSlot,
+  TeamSwap,
+} from "../../types";
 import { ChampionGrid } from "../ChampionGrid";
 import { SkinCarousel } from "../SkinCarousel";
 import { SpellPicker } from "../SpellPicker";
@@ -16,6 +25,13 @@ type Tab = "champion" | "spells" | "skin";
  * per champion it passes, short enough to feel immediate on a deliberate tap.
  */
 const HOVER_DELAY_MS = 250;
+
+const SWAP_TOAST: Record<SwapAction, string> = {
+  request: "Swap requested.",
+  accept: "Swap accepted.",
+  decline: "Swap declined.",
+  cancel: "Swap withdrawn.",
+};
 
 export function ChampSelectPanel({
   state,
@@ -240,6 +256,23 @@ export function ChampSelectPanel({
             </button>
           ))}
         </div>
+
+        {/* Above the tabs, and outside them: a teammate can ask for a swap at
+            any point in the draft, including while you are busy picking or
+            sitting on the skin tab, and an expiring request is not something to
+            find by navigating to it. */}
+        <SwapCard
+          select={select}
+          connection={connection}
+          champions={champions}
+          busy={busy}
+          onAct={(swap, action) =>
+            void guard(
+              () => api.swap(connection, swap.kind, swap.id, action),
+              SWAP_TOAST[action],
+            )
+          }
+        />
 
         <AnimatePresence mode="wait">
           {tab === "champion" && (
@@ -478,6 +511,160 @@ function BanRow({ championIds, connection }: { championIds: number[]; connection
 
 function SideLabel({ children }: { children: string }) {
   return <p className="text-[10px] font-bold uppercase tracking-wider text-ink-dim mb-1.5">{children}</p>;
+}
+
+const SWAP_LABEL: Record<SwapKind, string> = {
+  position: "Role",
+  pickOrder: "Pick order",
+};
+
+/** Only these three are worth showing; the rest are settled or not offerable. */
+function actionableSwaps(swaps: TeamSwap[]): TeamSwap[] {
+  return swaps.filter(
+    (swap) => swap.state === "RECEIVED" || swap.state === "SENT" || swap.state === "AVAILABLE",
+  );
+}
+
+/**
+ * Role and pick-order trades with your own team.
+ *
+ * Incoming requests are pulled to the top and given the loud treatment because
+ * they are the only half that expires — a teammate is waiting on an answer,
+ * where an offer you might make can sit there all draft. Offers you have sent
+ * come next so there is something to cancel, and the rest is the list of people
+ * you could ask.
+ */
+function SwapCard({
+  select,
+  connection,
+  champions,
+  busy,
+  onAct,
+}: {
+  select: NonNullable<AgentState["champSelect"]>;
+  connection: Connection;
+  champions: Champion[];
+  busy: boolean;
+  onAct: (swap: TeamSwap, action: SwapAction) => void;
+}) {
+  const swaps = actionableSwaps(select.swaps);
+  if (swaps.length === 0) return null;
+
+  const incoming = swaps.filter((swap) => swap.state === "RECEIVED");
+  const sent = swaps.filter((swap) => swap.state === "SENT");
+  const offerable = swaps.filter((swap) => swap.state === "AVAILABLE");
+
+  const describe = (swap: TeamSwap): string => {
+    const mate = select.myTeam.find((slot) => slot.cellId === swap.cellId);
+    const championId = mate ? mate.championId || mate.championPickIntent : 0;
+    const name = championId ? champions.find((c) => c.id === championId)?.name : "";
+    const role = mate?.assignedPosition ? positionLabel(mate.assignedPosition) : "";
+    return name || role || "a teammate";
+  };
+
+  const mateIcon = (swap: TeamSwap) => {
+    const mate = select.myTeam.find((slot) => slot.cellId === swap.cellId);
+    const championId = mate ? mate.championId || mate.championPickIntent : 0;
+    return championId ? (
+      <img
+        src={championIconUrl(connection, championId)}
+        alt=""
+        className="h-9 w-9 shrink-0 rounded-lg bg-obsidian-raised"
+      />
+    ) : (
+      <div className="h-9 w-9 shrink-0 rounded-lg border border-dashed border-hairline bg-obsidian-raised" />
+    );
+  };
+
+  return (
+    <Card>
+      <SectionTitle accent={incoming.length > 0 ? "gold" : "dim"}>Swaps</SectionTitle>
+
+      {incoming.map((swap) => (
+        // Buttons on their own row rather than beside the name: at phone width
+        // an icon, a sentence and two buttons do not fit, and the half that got
+        // squeezed was the sentence saying who is asking and for what.
+        <div
+          key={`${swap.kind}-${swap.id}`}
+          className="mb-3 rounded-xl border border-gold/60 bg-gold/[0.06] p-2.5"
+        >
+          <div className="flex items-center gap-3">
+            {mateIcon(swap)}
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-semibold text-ink">
+                {describe(swap)} wants to swap
+              </span>
+              <span className="block text-[11px] text-ink-dim">{SWAP_LABEL[swap.kind]}</span>
+            </span>
+          </div>
+          <div className="mt-2.5 flex gap-2">
+            <Button
+              variant="ghost"
+              size="md"
+              className="flex-1"
+              disabled={busy}
+              onClick={() => onAct(swap, "decline")}
+            >
+              Decline
+            </Button>
+            <Button
+              variant="gold"
+              size="md"
+              className="flex-1"
+              disabled={busy}
+              onClick={() => onAct(swap, "accept")}
+            >
+              Accept
+            </Button>
+          </div>
+        </div>
+      ))}
+
+      {sent.map((swap) => (
+        <div
+          key={`${swap.kind}-${swap.id}`}
+          className="mb-2 flex items-center gap-3 rounded-xl border border-hairline bg-white/[0.03] p-2.5"
+        >
+          {mateIcon(swap)}
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm text-ink">Asked {describe(swap)}</span>
+            <span className="block text-[11px] text-ink-dim">
+              {SWAP_LABEL[swap.kind]} — waiting for an answer
+            </span>
+          </span>
+          <Button variant="ghost" size="md" disabled={busy} onClick={() => onAct(swap, "cancel")}>
+            Cancel
+          </Button>
+        </div>
+      ))}
+
+      {offerable.length > 0 && (
+        <>
+          {(incoming.length > 0 || sent.length > 0) && <div className="my-3 h-px bg-hairline" />}
+          <p className="mb-2 text-[11px] text-ink-dim">Ask a teammate to swap</p>
+          <div className="flex flex-wrap gap-2">
+            {offerable.map((swap) => (
+              <button
+                key={`${swap.kind}-${swap.id}`}
+                type="button"
+                disabled={busy}
+                onClick={() => onAct(swap, "request")}
+                className="flex items-center gap-2 rounded-xl border border-hairline bg-white/[0.03] py-1.5 pl-1.5 pr-3 text-left transition-colors hover:border-white/25 disabled:opacity-50"
+              >
+                {mateIcon(swap)}
+                <span className="min-w-0">
+                  <span className="block truncate text-xs font-semibold text-ink">
+                    {describe(swap)}
+                  </span>
+                  <span className="block text-[10px] text-ink-dim">{SWAP_LABEL[swap.kind]}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </Card>
+  );
 }
 
 function TeamCard({

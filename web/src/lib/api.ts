@@ -12,6 +12,8 @@ import type {
   RuneCatalog,
   RuneSourceInfo,
   Skin,
+  SwapAction,
+  SwapKind,
   StoredRunePage,
   SummonerSpell,
 } from "../types";
@@ -193,6 +195,9 @@ export const api = {
   setSkin: (c: Connection, skinId: number) => post<{ ok: true }>(c, "/api/skin", { skinId }),
 
   benchSwap: (c: Connection, championId: number) => post<{ ok: true }>(c, "/api/bench-swap", { championId }),
+
+  swap: (c: Connection, kind: SwapKind, id: number, action: SwapAction) =>
+    post<{ ok: true }>(c, "/api/swap", { kind, id, action }),
 
   startQueue: (c: Connection) => post<{ ok: true }>(c, "/api/queue/start"),
 

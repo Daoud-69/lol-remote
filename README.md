@@ -45,6 +45,9 @@ Neither download needs the source. Clone the repo only if you want to build it y
   different situation from one who has committed to it
 - Set both summoner spells
 - Pick a skin once you're locked in (owned skins selectable, locked ones shown greyed)
+- **Swap roles or pick order with a teammate** — ask whoever you want, and answer the ones they ask
+  you with Accept or Decline. Incoming requests sit above everything, because they are the half
+  that expires
 - Swap from the ARAM/Swiftplay bench
 - Start and stop matchmaking, and leave the lobby again
 
@@ -470,6 +473,25 @@ with the rest of the session. Their `assignedPosition` is empty, though — role
 — which is why the phone captions those slots with the champion's name instead. Modes that hide the
 enemy team outright send an empty array, and the board simply omits that half.
 
+**Swapping roles and pick order.** Two features in the client, one shape here: the session carries
+`positionSwaps` and `pickOrderSwaps`, each a list of `{ id, cellId, state }` — one entry per
+teammate you could trade with — and both are driven by the same four verbs,
+`POST /lol-champ-select/v1/session/{position-swaps,pick-order-swaps}/{id}/{request,accept,decline,cancel}`.
+The id identifies the teammate and the kind together, so none of those calls carries a body. That
+is why the agent flattens both lists into one with a `kind` tag and exposes a single `/api/swap`
+rather than eight routes that would differ only in a path segment.
+
+`state` is what makes it legible, and only three of its eight values are worth a button:
+`AVAILABLE` is an offer you could make, `SENT` one you are waiting on, and `RECEIVED` a teammate
+asking *you*. The rest are either settled (`ACCEPTED`, `DECLINED`, `CANCELLED`) or not offerable
+(`BUSY` while that player is mid-swap with someone else, `INVALID` where the trade makes no sense).
+All eight are passed through to the phone rather than filtered in the agent, so an unrecognised
+state degrades to "not offerable" instead of vanishing.
+
+The agent checks that a swap is one the client is currently offering before forwarding the call.
+A phone that has been asleep can otherwise accept a request that has already expired, and the
+client's own error for that is not something worth showing anybody.
+
 **Which champion to pick.** The agent reads `assignedPosition` off its own slot in `myTeam` and
 takes the first entry from that role's list that nobody has banned or locked. Autofill needs no
 special case: the role the client assigned *is* the lookup key, so being handed support instead of
@@ -674,6 +696,24 @@ QR pairing, verified without a phone in hand:
 - The dev agent prints a scannable terminal QR and the matching link above its pairing banner
 - Agent, web and desktop all typecheck and build clean with it in; lazy-loading the scanner keeps
   the decoder out of the initial bundle, which came down from 483 kB to 386 kB
+
+Role and pick-order swaps, built against the client's own `/help` rather than from memory — the
+route names, the `{ id, cellId, state }` contract and all eight `state` values were read off a live
+client, and the derived URLs confirmed against it (a real route answers `RPC_ERROR` / "No active
+delegate" outside champ select, where an invented one answers `RESOURCE_NOT_FOUND` / "Invalid URI
+format"). Driven through the actual UI against a captured draft holding one swap in each state:
+
+- The card shows an incoming request with Accept and Decline, an outgoing one with Cancel, and the
+  teammates who could be asked — and each button sends the right kind, id and verb
+  (`accept`/`decline` on the position swap it was drawn for, `cancel` on the pick-order one, and
+  `request` on the teammate actually tapped)
+- `BUSY` and `DECLINED` entries render nothing at all, rather than a button the client would refuse
+- The route refuses a bad kind, a bad action, a missing id, and an id the client is not currently
+  offering, each with a sentence rather than a status code
+
+**Not tested, needing four other people:** a swap actually completing. Every request the phone can
+send has been checked into the agent and every response path exercised, but nobody has pressed
+Accept on the other end.
 
 **Not yet seen in a real draft:** the enemy half of the champ-select board. Practice Tool has no
 opposing team and no bans, so the one mode it has been exercised in is exactly the one that cannot

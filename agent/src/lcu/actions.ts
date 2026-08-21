@@ -5,7 +5,10 @@ import type {
   LobbyPositions,
   MyAction,
   PositionPreference,
+  SwapAction,
+  SwapKind,
   TeammateSlot,
+  TeamSwap,
 } from "../types.js";
 
 /** Accepts the ready check. Harmless to call when no check is pending. */
@@ -207,6 +210,63 @@ interface RawSession {
   timer: { adjustedTimeLeftInPhase: number; phase: string };
   benchEnabled: boolean;
   benchChampions?: { championId: number }[];
+  positionSwaps?: RawSwap[];
+  pickOrderSwaps?: RawSwap[];
+}
+
+interface RawSwap {
+  id: number;
+  cellId: number;
+  state: string;
+}
+
+/** The route segment each kind lives under, which is all that differs between them. */
+const SWAP_SEGMENT: Record<SwapKind, string> = {
+  position: "position-swaps",
+  pickOrder: "pick-order-swaps",
+};
+
+/**
+ * Both swap lists flattened into one, tagged with which kind they came from.
+ *
+ * The client keeps them apart because they trade different things, but every
+ * other property is identical — same contract, same four verbs — so carrying a
+ * discriminator costs less than threading two parallel lists through to the
+ * phone and back.
+ */
+function collectSwaps(raw: RawSession): TeamSwap[] {
+  const read = (list: RawSwap[] | undefined, kind: SwapKind): TeamSwap[] =>
+    (list ?? [])
+      .filter((swap) => swap && typeof swap.id === "number")
+      .map((swap) => ({
+        id: swap.id,
+        cellId: swap.cellId ?? 0,
+        // Unknown states are passed through rather than coerced: a state this
+        // does not recognise should read as "not offerable", which is what the
+        // phone does with anything outside the three it acts on.
+        state: (swap.state ?? "INVALID") as TeamSwap["state"],
+        kind,
+      }));
+
+  return [...read(raw.positionSwaps, "position"), ...read(raw.pickOrderSwaps, "pickOrder")];
+}
+
+/**
+ * Requests, accepts, declines or cancels one swap.
+ *
+ * Every verb is a bare POST keyed by the swap's own id — the id identifies both
+ * the teammate and the kind, so there is nothing to send in a body.
+ */
+export async function respondToSwap(
+  lcu: LcuClient,
+  kind: SwapKind,
+  id: number,
+  action: SwapAction,
+): Promise<void> {
+  await lcu.request(
+    "POST",
+    `/lol-champ-select/v1/session/${SWAP_SEGMENT[kind]}/${id}/${action}`,
+  );
 }
 
 function toSlot(player: RawPlayer, localCellId: number): TeammateSlot {
@@ -324,6 +384,7 @@ export function parseSession(
     myTeam: (raw.myTeam ?? []).map((p) => toSlot(p, raw.localPlayerCellId)),
     theirTeam: (raw.theirTeam ?? []).map((p) => toSlot(p, raw.localPlayerCellId)),
     bans: collectBans(raw),
+    swaps: collectSwaps(raw),
     myAssignedPosition: assigned,
     autofilled,
     benchEnabled: Boolean(raw.benchEnabled),
