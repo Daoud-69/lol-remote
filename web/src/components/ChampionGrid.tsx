@@ -34,7 +34,10 @@ export function ChampionGrid({
   };
 
   return (
-    <div className="flex flex-col min-h-0">
+    // h-full so the grid fills the fixed-height box both callers wrap it in.
+    // Without it this sized to its content and simply overflowed that box —
+    // harmless while nothing sat underneath, and an overlap once something did.
+    <div className="flex h-full flex-col min-h-0">
       <div className="relative mb-3 shrink-0">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-dim" />
         <input
@@ -48,7 +51,15 @@ export function ChampionGrid({
       {filtered.length === 0 ? (
         <p className="text-ink-dim text-sm text-center py-8">No champion matches that.</p>
       ) : (
-        <div className="grid grid-cols-4 sm:grid-cols-5 md:grid-cols-6 gap-2 overflow-y-auto pr-1 no-scrollbar">
+        // min-h-0 lets this flex child shrink below its content height, which
+        // is what turns overflow-y-auto into an actual scroll instead of growth.
+        // Fixed column counts are right for a phone, where the width is known
+        // and four across is the readable answer. They are wrong above that: a
+        // fixed count makes a wider window enlarge each portrait rather than
+        // fit more, and every breakpoint band has its own awkward size. So the
+        // desktop side asks for a portrait size instead and takes whatever
+        // column count that implies.
+        <div className="grid min-h-0 grid-cols-4 sm:grid-cols-5 md:grid-cols-[repeat(auto-fill,minmax(100px,1fr))] gap-2 overflow-y-auto pr-1 no-scrollbar">
           {filtered.map((champion) => {
             const available = isAvailable(champion);
             const selected = champion.id === selectedId;

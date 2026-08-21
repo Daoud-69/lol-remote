@@ -39,6 +39,9 @@ const DEFAULT_AUTOMATION: AutomationSettings = {
   autoSpell2Id: 0,
   runePages: {},
   applyRunes: false,
+  // The zero-setup answer: with "apply runes" on and nothing configured for the
+  // champion, the client's own suggestion beats doing nothing at all.
+  runeSource: "client",
   panicLockAtSeconds: 3,
 };
 

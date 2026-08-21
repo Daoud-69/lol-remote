@@ -21,6 +21,7 @@ import {
   stopQueue,
 } from "./lcu/actions.js";
 import { listPages, readCatalog, recommendedPages } from "./lcu/runes.js";
+import { RUNE_SOURCES } from "./runeSource.js";
 import type { PositionPreference, ServerMessage } from "./types.js";
 
 export interface ServerHandle {
@@ -141,6 +142,16 @@ export async function startServer(
    * The client's own suggestions. Position is optional — the endpoint needs
    * one, and "NONE" is the neutral answer for modes without roles.
    */
+  /**
+   * The sources this build knows about, so the phone's picker lists what the
+   * agent can actually do rather than a copy that drifts from it.
+   */
+  app.get("/api/runes/sources", (_req, res) => {
+    res.json(
+      RUNE_SOURCES.map(({ id, label, help }) => ({ id, label, help })),
+    );
+  });
+
   app.get("/api/runes/recommended/:championId", (req, res) => {
     void run(res, async () => {
       const championId = Number(req.params.championId);

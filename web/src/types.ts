@@ -179,6 +179,16 @@ export interface LobbyPositions {
   queueName: string;
 }
 
+/** Which fallback supplies runes for a champion you never configured. */
+export type RuneSourceId = "none" | "client";
+
+/** One selectable rune source, as the agent advertises it. */
+export interface RuneSourceInfo {
+  id: RuneSourceId;
+  label: string;
+  help: string;
+}
+
 export interface RunePage {
   primaryStyleId: number;
   secondaryStyleId: number;
@@ -208,6 +218,8 @@ export interface AutomationSettings {
   autoSpell2Id: number;
   runePages: Record<number, RunePage>;
   applyRunes: boolean;
+  /** Where a page comes from for a champion with none saved above. */
+  runeSource: RuneSourceId;
   panicLockAtSeconds: number;
 }
 

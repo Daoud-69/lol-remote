@@ -155,6 +155,21 @@ export interface LobbyPositions {
 }
 
 /**
+ * Which fallback supplies runes for a champion you never configured.
+ *
+ * A string union rather than a boolean because the client's recommendation is
+ * the first source, not the only possible one — see `runeSource.ts`.
+ */
+export type RuneSourceId = "none" | "client";
+
+/** One selectable rune source, as the phone's settings picker lists them. */
+export interface RuneSourceInfo {
+  id: RuneSourceId;
+  label: string;
+  help: string;
+}
+
+/**
  * A rune page as the client stores it: two styles plus nine perk ids, ordered
  * keystone, three primary minors, two secondary minors, three stat shards.
  */
@@ -211,6 +226,11 @@ export interface AutomationSettings {
   /** Rune page to apply per champion id, once that champion is locked. */
   runePages: Record<number, RunePage>;
   applyRunes: boolean;
+  /**
+   * Where to get a page for a champion with none saved above. "none" leaves
+   * those champions alone, which is what this did before there were sources.
+   */
+  runeSource: RuneSourceId;
 
   /** Seconds of remaining turn time at which we force the lock as a safety net. */
   panicLockAtSeconds: number;

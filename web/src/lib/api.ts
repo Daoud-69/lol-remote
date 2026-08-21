@@ -10,6 +10,7 @@ import type {
   PositionPreference,
   RecommendedRunePage,
   RuneCatalog,
+  RuneSourceInfo,
   Skin,
   StoredRunePage,
   SummonerSpell,
@@ -254,6 +255,7 @@ export const api = {
   spells: (c: Connection) => call<SummonerSpell[]>(c, "/api/spells"),
   skins: (c: Connection, championId: number) => call<Skin[]>(c, `/api/skins/${championId}`),
 
+  runeSources: (c: Connection) => call<RuneSourceInfo[]>(c, "/api/runes/sources"),
   runeCatalog: (c: Connection) => call<RuneCatalog>(c, "/api/runes/catalog"),
   runePages: (c: Connection) => call<StoredRunePage[]>(c, "/api/runes/pages"),
 

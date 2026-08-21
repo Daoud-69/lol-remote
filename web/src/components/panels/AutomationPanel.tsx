@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { BellRing, ChevronRight, Sparkles } from "lucide-react";
 import { api, championIconUrl, spellIconUrl, type Connection } from "../../lib/api";
 import { useAutomation } from "../../hooks/useAutomation";
@@ -11,8 +11,19 @@ import {
   type Position,
   type RolePreset,
   type RunePage,
+  type RuneSourceInfo,
   type SummonerSpell,
 } from "../../types";
+
+/**
+ * The one option the agent does not advertise, because it is the absence of a
+ * source rather than one of them: the behaviour this had before sources existed.
+ */
+const OFF_SOURCE: RuneSourceInfo = {
+  id: "none",
+  label: "Leave it alone",
+  help: "Champions with no page here keep whatever page is already current.",
+};
 import { ChampionGrid } from "../ChampionGrid";
 import { ChampionSlots } from "../ChampionSlots";
 import { RolePicker, positionLabel } from "../RolePicker";
@@ -59,6 +70,19 @@ export function AutomationPanel({
 
   const championName = (id: number) =>
     champions.find((c) => c.id === id)?.name ?? `Champion ${id}`;
+
+  // Listed by the agent rather than hardcoded here, so a build that gains a
+  // source offers it without the phone needing to know the name in advance.
+  const [runeSources, setRuneSources] = useState<RuneSourceInfo[]>([]);
+  useEffect(() => {
+    void api
+      .runeSources(connection)
+      .then(setRuneSources)
+      .catch(() => setRuneSources([]));
+  }, [connection]);
+
+  const sourceOptions = [OFF_SOURCE, ...runeSources];
+  const activeSource = sourceOptions.find((source) => source.id === settings.runeSource);
 
   const preset: RolePreset =
     tab === "NONE"
@@ -318,6 +342,31 @@ export function AutomationPanel({
           value={settings.applyRunes}
           onChange={(v) => update({ applyRunes: v })}
         />
+
+        {settings.applyRunes && (
+          <div className="mt-4 border-t border-hairline pt-4">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-ink-muted">
+              For a champion with no page below
+            </p>
+            <div className="mt-2.5 flex flex-wrap gap-2">
+              {sourceOptions.map((source) => (
+                <button
+                  key={source.id}
+                  type="button"
+                  onClick={() => update({ runeSource: source.id })}
+                  className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                    settings.runeSource === source.id
+                      ? "border-hextech bg-hextech/10 text-hextech"
+                      : "border-hairline bg-white/[0.03] text-ink-muted"
+                  }`}
+                >
+                  {source.label}
+                </button>
+              ))}
+            </div>
+            <Muted>{activeSource?.help ?? OFF_SOURCE.help}</Muted>
+          </div>
+        )}
 
         <div className="mt-3 space-y-2">
           {runeChampionIds.map((championId) => (

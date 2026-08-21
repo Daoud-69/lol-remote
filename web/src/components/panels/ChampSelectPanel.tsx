@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { Ban, Sword } from "lucide-react";
 import { api, championIconUrl, skinSplashUrl, type Connection } from "../../lib/api";
-import type { AgentState, Champion, Skin, SummonerSpell } from "../../types";
+import type { AgentState, Champion, Skin, SummonerSpell, TeammateSlot } from "../../types";
 import { ChampionGrid } from "../ChampionGrid";
 import { SkinCarousel } from "../SkinCarousel";
 import { SpellPicker } from "../SpellPicker";
@@ -10,6 +10,12 @@ import { Button } from "../ui/Button";
 import { Card, SectionTitle, Muted } from "../ui/primitives";
 
 type Tab = "champion" | "spells" | "skin";
+
+/**
+ * Long enough that scrolling a finger across the grid does not fire a request
+ * per champion it passes, short enough to feel immediate on a deliberate tap.
+ */
+const HOVER_DELAY_MS = 250;
 
 export function ChampSelectPanel({
   state,
@@ -113,6 +119,55 @@ export function ChampSelectPanel({
     };
   }, [connection, backgroundChampionId, lockedChampionId, skins, selectedSkinId]);
 
+  const hoverTimer = useRef<number | null>(null);
+  /** The champion the client was last told about, so a re-tap is not re-sent. */
+  const hoverSent = useRef(0);
+
+  // A new action is a fresh slate: the same champion tapped for a ban after a
+  // pick is a different request, not a repeat of one already sent.
+  const actionId = select?.myAction?.id ?? 0;
+  useEffect(() => {
+    hoverSent.current = 0;
+  }, [actionId]);
+
+  useEffect(() => {
+    return () => {
+      if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current);
+    };
+  }, []);
+
+  /**
+   * Tapping a champion moves the local selection and hovers it in the client.
+   *
+   * Hovering is what tapping *means* — there is no reading of "I tapped this
+   * champion" where you did not want the team to see it, which is why this is
+   * the behaviour rather than a button next to it. Locking still has its own
+   * button, because that one is not reversible.
+   *
+   * Sent quietly: the champion appearing in the client is its own
+   * confirmation, and a toast per tap would bury the screen. A refusal still
+   * gets said out loud.
+   */
+  const chooseChampion = useCallback(
+    (championId: number) => {
+      setHovered(championId);
+      if (!championId) return;
+
+      if (hoverTimer.current !== null) window.clearTimeout(hoverTimer.current);
+      hoverTimer.current = window.setTimeout(() => {
+        hoverTimer.current = null;
+        if (hoverSent.current === championId) return;
+        hoverSent.current = championId;
+        api.select(connection, championId, false).catch((error: unknown) => {
+          // Let the next tap on this champion try again.
+          if (hoverSent.current === championId) hoverSent.current = 0;
+          onToast((error as Error).message, "error");
+        });
+      }, HOVER_DELAY_MS);
+    },
+    [connection, onToast],
+  );
+
   /** Runs a command, reports it, and says whether the client accepted it. */
   const guard = useCallback(
     async (action: () => Promise<unknown>, success: string): Promise<boolean> => {
@@ -190,39 +245,40 @@ export function ChampSelectPanel({
           {tab === "champion" && (
             <motion.div key="champion" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.25 }}>
               {isMyTurn ? (
+                <div className="space-y-4">
                 <Card>
-                  <div className="flex gap-2 mb-3">
-                    <Button
-                      variant="ghost"
-                      size="md"
-                      className="flex-1"
-                      disabled={!target || busy}
-                      onClick={() => void guard(() => api.select(connection, target, false), isBan ? "Ban hovered." : "Champion hovered.")}
-                    >
-                      {isBan ? "Hover ban" : "Hover"}
-                    </Button>
-                    <Button
-                      variant={isBan ? "danger" : "gold"}
-                      size="md"
-                      className="flex-1"
-                      icon={isBan ? <Ban className="h-4 w-4" /> : <Sword className="h-4 w-4" />}
-                      disabled={!target || busy}
-                      onClick={() => void guard(() => api.select(connection, target, true), isBan ? "Ban locked." : "Champion locked in.")}
-                    >
-                      {isBan ? "Lock ban" : "Lock in"}
-                    </Button>
-                  </div>
+                  {/* Only locking gets a button. Hovering happens on the tap
+                      itself, so a second press to confirm what you just chose
+                      is a step with nothing behind it. */}
+                  <Button
+                    variant={isBan ? "danger" : "gold"}
+                    size="md"
+                    className="mb-1 w-full"
+                    icon={isBan ? <Ban className="h-4 w-4" /> : <Sword className="h-4 w-4" />}
+                    disabled={!target || busy}
+                    onClick={() => void guard(() => api.select(connection, target, true), isBan ? "Ban locked." : "Champion locked in.")}
+                  >
+                    {isBan ? "Lock ban" : "Lock in"}
+                  </Button>
+                  <p className="mb-3 text-center text-[11px] text-ink-dim">
+                    {isBan ? "Tap a champion to put it on the ban." : "Tap a champion to hover it for the team."}
+                  </p>
                   <div className="h-[min(60svh,520px)]">
-                    <ChampionGrid champions={champions} connection={connection} selectedId={target} onSelect={setHovered} mode={isBan ? "ban" : "pick"} />
+                    <ChampionGrid champions={champions} connection={connection} selectedId={target} onSelect={chooseChampion} mode={isBan ? "ban" : "pick"} />
                   </div>
                 </Card>
+                {/* Below the grid rather than above it: on your turn the board
+                    is what you are picking against, but the grid is what you
+                    came here to tap. */}
+                <TeamCard select={select} connection={connection} champions={champions} />
+                </div>
               ) : (
                 <div className="space-y-4">
                   <Card>
                     <Muted>{lockedChampionId ? "You are locked in. Set your spells and skin while you wait." : "It is not your turn yet. The buttons unlock the moment it is."}</Muted>
                   </Card>
                   <BenchRow select={select} connection={connection} busy={busy} onSwap={(id) => void guard(() => api.benchSwap(connection, id), "Swapped from the bench.")} />
-                  <TeamCard select={select} connection={connection} />
+                  <TeamCard select={select} connection={connection} champions={champions} />
                 </div>
               )}
             </motion.div>
@@ -279,7 +335,7 @@ export function ChampSelectPanel({
           )}
         </AnimatePresence>
 
-        {tab !== "champion" && <TeamCard select={select} connection={connection} />}
+        {tab !== "champion" && <TeamCard select={select} connection={connection} champions={champions} />}
       </div>
     </div>
   );
@@ -360,47 +416,118 @@ function positionLabel(position: string): string {
   return position === "utility" ? "support" : position;
 }
 
-function TeamCard({ select, connection }: { select: NonNullable<AgentState["champSelect"]>; connection: Connection }) {
-  const bans = [...select.bans.myTeamBans, ...select.bans.theirTeamBans].filter(Boolean);
+/**
+ * One team's five slots.
+ *
+ * A hovered champion is drawn faded and a locked one solid, because the two
+ * mean very different things to anyone reading the board — an enemy hovering
+ * your counter is still talkable-out-of, a locked one is not.
+ */
+function TeamRow({
+  slots,
+  connection,
+  label,
+}: {
+  slots: TeammateSlot[];
+  connection: Connection;
+  label: (slot: TeammateSlot) => string;
+}) {
+  return (
+    <div className="flex gap-2">
+      {slots.map((slot) => {
+        const shown = slot.championId || slot.championPickIntent;
+        const locked = slot.championId > 0;
+        return (
+          // Capped, because the cell is square and grows to fill: a mode with a
+          // team of one (Practice Tool, a small custom) would otherwise stretch
+          // that single slot to the full width and an equal height, burying
+          // everything below it.
+          <div key={slot.cellId} className="flex-1 max-w-[88px] flex flex-col items-center gap-1">
+            {shown > 0 ? (
+              <img
+                src={championIconUrl(connection, shown)}
+                alt=""
+                className={`aspect-square w-full rounded-lg bg-obsidian-raised border-2 ${
+                  slot.isLocalPlayer ? "border-gold" : "border-transparent"
+                } ${locked ? "" : "opacity-55"}`}
+              />
+            ) : (
+              <div className={`aspect-square w-full rounded-lg bg-obsidian-raised border-2 border-dashed ${slot.isLocalPlayer ? "border-gold" : "border-hairline"}`} />
+            )}
+            <span className="text-[9px] text-ink-dim truncate w-full text-center">{label(slot) || "—"}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function BanRow({ championIds, connection }: { championIds: number[]; connection: Connection }) {
+  if (championIds.length === 0) return <p className="text-ink-dim text-xs">None yet.</p>;
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {championIds.map((championId, index) => (
+        <div key={`${championId}-${index}`} className="relative h-9 w-9 rounded-lg overflow-hidden opacity-70">
+          <img src={championIconUrl(connection, championId)} alt="" className="h-full w-full bg-obsidian-raised" />
+          <Ban className="absolute inset-0 m-auto h-4 w-4 text-danger" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SideLabel({ children }: { children: string }) {
+  return <p className="text-[10px] font-bold uppercase tracking-wider text-ink-dim mb-1.5">{children}</p>;
+}
+
+function TeamCard({
+  select,
+  connection,
+  champions,
+}: {
+  select: NonNullable<AgentState["champSelect"]>;
+  connection: Connection;
+  champions: Champion[];
+}) {
+  const myBans = select.bans.myTeamBans.filter(Boolean);
+  const theirBans = select.bans.theirTeamBans.filter(Boolean);
+
+  /** The enemy board is hidden outright in some modes, so it is drawn only when there is one. */
+  const theirTeam = select.theirTeam;
+
+  // Their roles are never revealed, so that line carries the champion's name
+  // instead — otherwise it would be five dashes taking up the same space.
+  const enemyLabel = (slot: TeammateSlot) => {
+    const id = slot.championId || slot.championPickIntent;
+    return id ? (champions.find((c) => c.id === id)?.name ?? "") : "";
+  };
 
   return (
     <Card>
-      <SectionTitle accent="dim">Your team</SectionTitle>
-      <div className="flex gap-2">
-        {select.myTeam.map((slot) => {
-          const shown = slot.championId || slot.championPickIntent;
-          return (
-            <div key={slot.cellId} className="flex-1 flex flex-col items-center gap-1">
-              {shown > 0 ? (
-                <img
-                  src={championIconUrl(connection, shown)}
-                  alt=""
-                  className={`aspect-square w-full rounded-lg bg-obsidian-raised border-2 ${slot.isLocalPlayer ? "border-gold" : "border-transparent"}`}
-                />
-              ) : (
-                <div className={`aspect-square w-full rounded-lg bg-obsidian-raised border-2 border-dashed ${slot.isLocalPlayer ? "border-gold" : "border-hairline"}`} />
-              )}
-              <span className="text-[9px] text-ink-dim truncate w-full text-center">{positionLabel(slot.assignedPosition) || "—"}</span>
-            </div>
-          );
-        })}
-      </div>
+      <SectionTitle accent="hextech">Your team</SectionTitle>
+      <TeamRow slots={select.myTeam} connection={connection} label={(slot) => positionLabel(slot.assignedPosition)} />
+
+      {theirTeam.length > 0 && (
+        <>
+          <div className="h-px bg-hairline my-4" />
+          <SectionTitle accent="danger">Enemy team</SectionTitle>
+          <TeamRow slots={theirTeam} connection={connection} label={enemyLabel} />
+        </>
+      )}
 
       <div className="h-px bg-hairline my-4" />
 
       <SectionTitle accent="dim">Bans</SectionTitle>
-      {bans.length === 0 ? (
-        <p className="text-ink-muted text-sm">None yet.</p>
-      ) : (
-        <div className="flex flex-wrap gap-1.5">
-          {bans.map((championId, index) => (
-            <div key={`${championId}-${index}`} className="relative h-9 w-9 rounded-lg overflow-hidden opacity-70">
-              <img src={championIconUrl(connection, championId)} alt="" className="h-full w-full bg-obsidian-raised" />
-              <Ban className="absolute inset-0 m-auto h-4 w-4 text-danger" />
-            </div>
-          ))}
+      <div className="space-y-3">
+        <div>
+          <SideLabel>Yours</SideLabel>
+          <BanRow championIds={myBans} connection={connection} />
         </div>
-      )}
+        <div>
+          <SideLabel>Theirs</SideLabel>
+          <BanRow championIds={theirBans} connection={connection} />
+        </div>
+      </div>
     </Card>
   );
 }

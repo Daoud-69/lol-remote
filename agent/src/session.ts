@@ -43,9 +43,11 @@ import {
   type LobbyPositions,
   type Position,
   type RolePreset,
+  type RunePage,
   type ServerMessage,
 } from "./types.js";
 import { loadAutomation, saveAutomation } from "./config.js";
+import { resolveRuneSource } from "./runeSource.js";
 
 /**
  * How many times to offer a champion for one action before giving up. The
@@ -505,26 +507,59 @@ export class Session extends EventEmitter {
   }
 
   /**
-   * Pushes the rune page saved for whatever we locked. Runs off the locked
-   * champion rather than the hover, since hovers change and rewriting the page
-   * on every hover would thrash the client.
+   * Pushes a rune page for whatever we locked. Runs off the locked champion
+   * rather than the hover, since hovers change and rewriting the page on every
+   * hover would thrash the client.
+   *
+   * The page saved for that champion wins. Failing that the configured source
+   * is asked, which is what makes this do something useful for a champion
+   * nobody has set up — see `runeSource.ts`.
    */
   private async maybeApplyRunes(): Promise<void> {
     const select = this.state.champSelect;
-    if (!this.lcu || !select) return;
+    const lcu = this.lcu;
+    if (!lcu || !select) return;
     if (!this.state.automation.applyRunes) return;
 
     const championId = select.selection?.championId ?? 0;
     if (championId <= 0 || championId === this.runesAppliedFor) return;
 
-    const page = this.state.automation.runePages[championId];
-    if (!page) return;
+    const saved = this.state.automation.runePages[championId];
+    const source = saved ? null : resolveRuneSource(this.state.automation.runeSource);
+    // Nothing saved and nothing to ask: leave whatever page is current alone.
+    if (!saved && !source) return;
 
+    // Claimed before the first await, so a state push landing while a source is
+    // still being fetched cannot start the same work a second time.
     this.runesAppliedFor = championId;
     const name = this.gameData?.championName(championId) ?? String(championId);
+
     try {
-      await applyRunePage(this.lcu, page, name);
-      this.log(`Applied your ${name} rune page.`);
+      let page: RunePage | undefined = saved;
+      let origin = "your saved page";
+
+      if (!page && source) {
+        const sourced = await source.load({
+          championId,
+          championName: name,
+          position: select.myAssignedPosition,
+          lcu,
+        });
+        if (!sourced) {
+          this.log(`No runes offered for ${name}, so none were applied.`);
+          return;
+        }
+        page = {
+          primaryStyleId: sourced.primaryStyleId,
+          secondaryStyleId: sourced.secondaryStyleId,
+          selectedPerkIds: sourced.selectedPerkIds,
+        };
+        origin = sourced.origin;
+      }
+      if (!page) return;
+
+      await applyRunePage(lcu, page, name);
+      this.log(`Applied ${origin} for ${name}.`);
     } catch (error) {
       this.log(`Could not apply runes: ${describeLcuError(error)}`);
     }

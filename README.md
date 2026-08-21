@@ -51,7 +51,9 @@ Neither download needs the source. Clone the repo only if you want to build it y
 - An ordered ban list, which skips anything a teammate has already declared
 - Preset summoner spells, globally or per role
 - **A rune page per champion** — build one in the app, or load one of the client's own
-  recommendations for that champion and role. Applied automatically when you lock in.
+  recommendations for that champion and role. Applied automatically when you lock in. Champions
+  you never got around to setting up fall back to a **rune source**, so locking a champion with no
+  page saved still gets sensible runes instead of nothing
 - **Panic lock** — commits whatever is hovered a few seconds before the timer expires, so a phone
   that loses signal mid-select doesn't leave you with a random champion
 
@@ -61,6 +63,27 @@ page of its own, named `LoL Remote — <champion>`, and rewrites it each time yo
 made yourself are never touched. If your account is at its cap and the agent has no page of its
 own yet, it says so and does nothing rather than deleting one of yours to make room — free a slot
 in the client once, and it will reuse that slot from then on.
+
+**Rune sources.** A page you saved for a champion always wins. The source is what answers for the
+champions you never configured, which is most of them for most people — without one, "apply runes
+on lock" did nothing at all unless you had already done the setup work. The only source that ships
+is the client's own recommendation for that champion and the role it assigned you, which costs
+nothing and needs no account anywhere.
+
+It is written as an interface (`agent/src/runeSource.ts`) rather than a direct call, because the
+client's recommendation is the first source that made sense, not the only one. What Blitz and
+Porofessor actually sell is a *different source* — pages derived from the win rates of millions of
+ranked games — and that is the same shape: champion and role in, a page out. Adding one is writing
+a `RuneSource` and listing it in `RUNE_SOURCES`; nothing above that file knows which kind it is
+talking to, and the phone's picker lists whatever the agent advertises rather than a copy of the
+list that would drift from it. Note that none of those sites publish an API for this — their
+numbers come out of undocumented endpoints their own overlays call, which is a licensing question
+before it is a technical one, and why this ships with the source that is simply Riot's own.
+
+A page from a source is checked before it is written: two distinct styles, exactly nine perks, all
+positive ids. The client's own recommendations are well-formed, but somebody else's JSON can change
+shape without warning, and the failure to avoid is half a page overwriting the one slot the agent
+owns.
 
 ## Setup
 
@@ -193,6 +216,7 @@ agent/src/
   session.ts            Owns the client connection, live state, automation rules
   server.ts             REST + WebSocket the phone talks to
   push.ts               Expo push sender
+  runeSource.ts         Where runes come from for a champion with no page saved
   types.ts              The agent↔phone contract
   lcu/
     credentials.ts      Finds the client's port + auth token
@@ -506,6 +530,13 @@ Since verified on Windows against a **live League client**, in a real ranked lob
   client's per-champion recommendations all serve to the phone
 - The rune writer refuses safely on a full account: it declines with a readable message and leaves
   every player-made page untouched, and rejects a page that isn't exactly 9 perks
+- The rune source resolves and validates against a **live client**: the client's recommendation for
+  Viego jungle, Ahri mid, Darius top, Jinx bot, Thresh support and a role-less (ARAM-style) request
+  all came back as usable nine-perk pages, and each one checks out against the perk catalog —
+  keystone in the primary tree, minors in the tree they belong to, three real stat shards, and the
+  two trees distinct (Precision/Inspiration Conqueror for Viego, Resolve/Inspiration Guardian for
+  Thresh). The guard rejects an eight-perk page, a zero style id and a zero perk id, and an
+  unknown source id degrades to "leave it alone" rather than throwing
 - With one slot free, applying runes creates the page with the exact styles and perks requested and
   makes it current; applying a second champion's runes **reuses the same slot** rather than
   consuming another, and both times the player's own pages came back byte-identical

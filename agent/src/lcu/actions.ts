@@ -222,6 +222,32 @@ function toSlot(player: RawPlayer, localCellId: number): TeammateSlot {
 }
 
 /**
+ * Both sides' bans, keyed by whose they are.
+ *
+ * `bans` is the obvious source, but it is not the only one and not always the
+ * complete one, so the completed ban actions are unioned into it rather than
+ * used only as a fallback — that way a side the `bans` object leaves empty
+ * still fills in, without depending on which of the two the client populated.
+ * `isAllyAction` is what separates the sides; the actor's cell id would need a
+ * lookup into both team lists to say the same thing.
+ *
+ * A champion can only be banned once per game, so a ban already recorded on
+ * either side is the same ban seen twice rather than a second one.
+ */
+function collectBans(raw: RawSession): { myTeamBans: number[]; theirTeamBans: number[] } {
+  const mine = new Set((raw.bans?.myTeamBans ?? []).filter(Boolean));
+  const theirs = new Set((raw.bans?.theirTeamBans ?? []).filter(Boolean));
+
+  for (const action of (raw.actions ?? []).flat()) {
+    if (action.type !== "ban" || !action.completed || !action.championId) continue;
+    if (mine.has(action.championId) || theirs.has(action.championId)) continue;
+    (action.isAllyAction ? mine : theirs).add(action.championId);
+  }
+
+  return { myTeamBans: [...mine], theirTeamBans: [...theirs] };
+}
+
+/**
  * Finds the action the local player is being asked to make.
  *
  * Actions arrive as an array of phases, each holding every player's action for
@@ -297,7 +323,7 @@ export function parseSession(
     myPickActionId: findMyPickActionId(raw),
     myTeam: (raw.myTeam ?? []).map((p) => toSlot(p, raw.localPlayerCellId)),
     theirTeam: (raw.theirTeam ?? []).map((p) => toSlot(p, raw.localPlayerCellId)),
-    bans: raw.bans ?? { myTeamBans: [], theirTeamBans: [] },
+    bans: collectBans(raw),
     myAssignedPosition: assigned,
     autofilled,
     benchEnabled: Boolean(raw.benchEnabled),
