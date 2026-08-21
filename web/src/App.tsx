@@ -99,6 +99,16 @@ export default function App() {
     };
   }, [toast]);
 
+  // The catalogs belong to whoever is logged in — which champions are owned is
+  // part of them. A client that goes away and comes back may be a different
+  // account, so drop them at the gap rather than carrying one account's
+  // champion list into another's session.
+  useEffect(() => {
+    if (state?.connectedToClient) return;
+    setChampions((current) => (current.length === 0 ? current : []));
+    setSpells((current) => (current.length === 0 ? current : []));
+  }, [state?.connectedToClient]);
+
   // Catalogs load once the client is up.
   useEffect(() => {
     if (!connection || !state?.connectedToClient) return;
