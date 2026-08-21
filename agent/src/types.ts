@@ -185,6 +185,33 @@ export interface GameQueue {
   group: string;
 }
 
+/**
+ * One of Swiftplay's pre-picked champions, chosen in the lobby rather than in
+ * champ select.
+ *
+ * The client calls these "player slots" and stores a whole loadout per slot —
+ * champion, the role you want to play it in, both spells, a skin and a rune
+ * page. The rune page is a JSON *string* inside the slot and is not modelled
+ * here: nothing on the phone edits it, and carrying it through the contract
+ * only to hand it back unchanged would invite it being dropped on a write.
+ */
+export interface LobbySlot {
+  championId: number;
+  /** "TOP", "UTILITY", … or "" when the slot has no role attached. */
+  positionPreference: string;
+  spell1Id: number;
+  spell2Id: number;
+  skinId: number;
+}
+
+/** What the phone may change about one slot; anything omitted is left alone. */
+export interface LobbySlotPatch {
+  championId?: number;
+  positionPreference?: string;
+  spell1Id?: number;
+  spell2Id?: number;
+}
+
 export interface LobbyPositions {
   first: PositionPreference;
   second: PositionPreference;
@@ -194,6 +221,12 @@ export interface LobbyPositions {
   queueId: number;
   /** Resolved mode name, e.g. "ARAM"; empty outside a lobby. */
   queueName: string;
+  /**
+   * Swiftplay's pre-picked champions. Empty in every mode that does not offer
+   * them, which is how the phone decides whether to show the picker at all —
+   * the client advertises no flag for it.
+   */
+  slots: LobbySlot[];
 }
 
 /**

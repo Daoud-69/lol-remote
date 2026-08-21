@@ -17,13 +17,20 @@ import {
   setSkin,
   setSpells,
   respondToSwap,
+  updatePlayerSlot,
   setWardSkin,
   startQueue,
   stopQueue,
 } from "./lcu/actions.js";
 import { listPages, readCatalog, recommendedPages } from "./lcu/runes.js";
 import { RUNE_SOURCES } from "./runeSource.js";
-import type { SwapAction, SwapKind } from "./types.js";
+import type {
+  LobbySlotPatch,
+  PositionPreference,
+  ServerMessage,
+  SwapAction,
+  SwapKind,
+} from "./types.js";
 
 const SWAP_ACTIONS: SwapAction[] = ["request", "accept", "decline", "cancel"];
 
@@ -39,7 +46,6 @@ const SWAP_NOUN: Record<SwapKind, string> = {
   position: "role",
   pickOrder: "pick order",
 };
-import type { PositionPreference, ServerMessage } from "./types.js";
 
 export interface ServerHandle {
   getConnectedPhoneCount: () => number;
@@ -511,6 +517,45 @@ export async function startServer(
       );
       await session.refreshAll();
       return { ok: true };
+    });
+  });
+
+  /**
+   * Changes one of Swiftplay's pre-picked champions. Anything the body leaves
+   * out keeps whatever the slot already had.
+   */
+  app.post("/api/lobby/slot", (req, res) => {
+    void run(res, async () => {
+      const index = Number(req.body?.index);
+      if (!Number.isInteger(index) || index < 0) {
+        throw new HttpError(400, "index is required.");
+      }
+
+      const patch: LobbySlotPatch = {};
+      if (req.body?.championId !== undefined) {
+        const championId = Number(req.body.championId);
+        if (!Number.isInteger(championId) || championId <= 0) {
+          throw new HttpError(400, "championId must be a champion.");
+        }
+        patch.championId = championId;
+      }
+      if (req.body?.positionPreference !== undefined) {
+        patch.positionPreference = String(req.body.positionPreference).toUpperCase();
+      }
+      if (req.body?.spell1Id !== undefined) patch.spell1Id = Number(req.body.spell1Id);
+      if (req.body?.spell2Id !== undefined) patch.spell2Id = Number(req.body.spell2Id);
+
+      if (Object.keys(patch).length === 0) {
+        throw new HttpError(400, "Nothing to change.");
+      }
+
+      const slots = await updatePlayerSlot(session.getClient(), index, patch);
+      const named = patch.championId
+        ? session.getGameData().championName(patch.championId)
+        : `slot ${index + 1}`;
+      session.log(`Set Swiftplay slot ${index + 1} to ${named}.`);
+      await session.refreshAll();
+      return { ok: true, slots };
     });
   });
 

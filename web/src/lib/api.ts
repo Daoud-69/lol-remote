@@ -7,6 +7,7 @@ import type {
   FriendGroup,
   GameQueue,
   LobbyPositions,
+  LobbySlot,
   PositionPreference,
   RecommendedRunePage,
   RuneCatalog,
@@ -195,6 +196,13 @@ export const api = {
   setSkin: (c: Connection, skinId: number) => post<{ ok: true }>(c, "/api/skin", { skinId }),
 
   benchSwap: (c: Connection, championId: number) => post<{ ok: true }>(c, "/api/bench-swap", { championId }),
+
+  /** Changes one Swiftplay slot; anything omitted keeps what the slot had. */
+  setLobbySlot: (
+    c: Connection,
+    index: number,
+    patch: { championId?: number; positionPreference?: string; spell1Id?: number; spell2Id?: number },
+  ) => post<{ ok: true; slots: LobbySlot[] }>(c, "/api/lobby/slot", { index, ...patch }),
 
   swap: (c: Connection, kind: SwapKind, id: number, action: SwapAction) =>
     post<{ ok: true }>(c, "/api/swap", { kind, id, action }),

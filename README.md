@@ -36,6 +36,9 @@ Neither download needs the source. Clone the repo only if you want to build it y
   you made, and add somebody by Riot ID
 - Accept / decline the ready check (full-screen takeover + vibration + push notification)
 - Pick your two lobby roles — the same selector the client shows, driven from the phone
+- **Swiftplay's champions, from the lobby** — that mode picks champions before the game rather than
+  in champ select, so the phone shows the slots the client is holding and lets you change who is in
+  each one
 - Pick and ban by tapping — a champion you tap is hovered in the client straight away, so the team
   sees it without a second press. Locking keeps a button of its own, being the half you cannot take
   back
@@ -473,6 +476,25 @@ with the rest of the session. Their `assignedPosition` is empty, though — role
 — which is why the phone captions those slots with the champion's name instead. Modes that hide the
 enemy team outright send an empty array, and the board simply omits that half.
 
+**Swiftplay picks its champions in the lobby.** Alone among the modes, it asks before champ select
+rather than during it, and it asks for more than a champion: the local member carries `playerSlots`,
+each a whole loadout of `{ championId, positionPreference, spell1, spell2, skinId, perks }`. They
+arrive with the lobby, so reading them costs nothing extra; writing takes the whole array back
+through `PUT /lol-lobby/v1/lobby/members/localMember/player-slots`. The internal name for the mode
+is QuickPlay, which is what the slot DTO is called.
+
+Two things to know before writing one. `perks` is a JSON *string* rather than an object — the same
+shape the friends list uses for party data — and is carried through untouched rather than parsed,
+since nothing here edits a slot's runes and re-encoding a string we never needed to read is only a
+way to corrupt it. And `skinId` is champion-scoped (`36000` belongs to champion 36), so changing a
+slot's champion has to reset it to that champion's base, `championId * 1000`, or the slot asks the
+client for a skin its champion does not have. Both survive because the agent re-reads the current
+slots and rewrites one entry rather than sending what the phone happens to know.
+
+Whether a mode has slots at all is answered by the list being empty, which is what the phone keys
+the picker off — the client advertises no flag for it, the way it does `showPositionSelector` for
+roles.
+
 **Swapping roles and pick order.** Two features in the client, one shape here: the session carries
 `positionSwaps` and `pickOrderSwaps`, each a list of `{ id, cellId, state }` — one entry per
 teammate you could trade with — and both are driven by the same four verbs,
@@ -710,6 +732,17 @@ format"). Driven through the actual UI against a captured draft holding one swap
 - `BUSY` and `DECLINED` entries render nothing at all, rather than a button the client would refuse
 - The route refuses a bad kind, a bad action, a missing id, and an id the client is not currently
   offering, each with a sentence rather than a status code
+
+Swiftplay slots, read off a **live Swiftplay lobby** — two configured slots came back with their
+champions, roles, spells, skins and rune strings intact, and a live ARAM lobby answers with an
+empty list, which is the case that keeps the picker out of every other mode. The card renders both
+slots by name and role, tapping one opens the picker for that slot, and choosing a champion sends
+the slot's index with it.
+
+**Not tested:** the write reaching the client. The `PUT` has never been sent to a live lobby — the
+lobby had moved to ARAM by the time this was built, and writing into one somebody may be about to
+queue from is not a thing to do speculatively. Reading, rendering and the request the phone sends
+are all confirmed; the client's half of it is not.
 
 **Not tested, needing four other people:** a swap actually completing. Every request the phone can
 send has been checked into the agent and every response path exercised, but nobody has pressed

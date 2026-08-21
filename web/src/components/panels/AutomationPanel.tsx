@@ -15,6 +15,14 @@ import {
   type SummonerSpell,
 } from "../../types";
 
+import { ChampionGrid } from "../ChampionGrid";
+import { ChampionSlots } from "../ChampionSlots";
+import { RolePicker, positionLabel } from "../RolePicker";
+import { RuneEditor } from "../RuneEditor";
+import { SwiftplaySlots } from "../SwiftplaySlots";
+import { Sheet } from "../ui/Sheet";
+import { Card, Muted, SectionTitle, Toggle } from "../ui/primitives";
+
 /**
  * The one option the agent does not advertise, because it is the absence of a
  * source rather than one of them: the behaviour this had before sources existed.
@@ -24,12 +32,6 @@ const OFF_SOURCE: RuneSourceInfo = {
   label: "Leave it alone",
   help: "Champions with no page here keep whatever page is already current.",
 };
-import { ChampionGrid } from "../ChampionGrid";
-import { ChampionSlots } from "../ChampionSlots";
-import { RolePicker, positionLabel } from "../RolePicker";
-import { RuneEditor } from "../RuneEditor";
-import { Sheet } from "../ui/Sheet";
-import { Card, Muted, SectionTitle, Toggle } from "../ui/primitives";
 
 /** Which list a champion picker is currently filling. */
 type PickerTarget =
@@ -205,6 +207,15 @@ export function AutomationPanel({
       </Card>
 
       <RolePicker lobby={state.lobby} connection={connection} onToast={onToast} />
+      {/* Directly under the roles: in Swiftplay the two are one decision, since
+          each slot pairs a champion with the role you want to play it in. */}
+      <SwiftplaySlots
+        lobby={state.lobby}
+        connection={connection}
+        champions={champions}
+        spells={spells}
+        onToast={onToast}
+      />
 
       <Card>
         <SectionTitle>Picks per role</SectionTitle>

@@ -3,6 +3,8 @@ import type {
   ChampSelectState,
   GameQueue,
   LobbyPositions,
+  LobbySlot,
+  LobbySlotPatch,
   MyAction,
   PositionPreference,
   SwapAction,
@@ -97,11 +99,78 @@ export async function setPositionPreferences(
 interface RawLobbyMember {
   firstPositionPreference: string | null;
   secondPositionPreference: string | null;
+  playerSlots?: RawPlayerSlot[];
+}
+
+/**
+ * A Swiftplay slot exactly as the client stores it.
+ *
+ * `perks` is a JSON string rather than an object — the same shape the friends
+ * list uses for party data — and is carried around untouched rather than
+ * parsed, since nothing here edits a slot's runes and re-encoding a string we
+ * did not need to read is only a way to corrupt it.
+ */
+interface RawPlayerSlot {
+  championId: number;
+  skinId: number;
+  positionPreference: string;
+  perks: string;
+  spell1: number;
+  spell2: number;
 }
 
 interface RawLobby {
   gameConfig?: { showPositionSelector?: boolean; queueId?: number };
   localMember?: RawLobbyMember;
+}
+
+const PLAYER_SLOTS = "/lol-lobby/v1/lobby/members/localMember/player-slots";
+
+/**
+ * Changes one Swiftplay slot, leaving the others and the untouched fields alone.
+ *
+ * The client only accepts the whole array, so the current slots are read back
+ * and rewritten with one entry patched. Reading first is what keeps a rune page
+ * and a skin the phone never sent from being blanked by the write.
+ *
+ * A new champion invalidates the skin: skin ids are champion-scoped (`36000`
+ * belongs to champion 36), so leaving the old one attached would ask the client
+ * for a skin that champion does not have. The base skin is `championId * 1000`.
+ */
+export async function updatePlayerSlot(
+  lcu: LcuClient,
+  index: number,
+  patch: LobbySlotPatch,
+): Promise<LobbySlot[]> {
+  const slots = await lcu.get<RawPlayerSlot[]>(PLAYER_SLOTS);
+  if (!Array.isArray(slots) || index < 0 || index >= slots.length) {
+    throw new Error(`This lobby has no slot ${index + 1}.`);
+  }
+
+  const current = slots[index];
+  const championId = patch.championId ?? current.championId;
+  const next: RawPlayerSlot = {
+    ...current,
+    championId,
+    skinId: championId === current.championId ? current.skinId : championId * 1000,
+    positionPreference: patch.positionPreference ?? current.positionPreference,
+    spell1: patch.spell1Id ?? current.spell1,
+    spell2: patch.spell2Id ?? current.spell2,
+  };
+
+  const updated = slots.map((slot, at) => (at === index ? next : slot));
+  await lcu.request("PUT", PLAYER_SLOTS, updated);
+  return updated.map(toLobbySlot);
+}
+
+function toLobbySlot(slot: RawPlayerSlot): LobbySlot {
+  return {
+    championId: slot.championId ?? 0,
+    positionPreference: slot.positionPreference ?? "",
+    spell1Id: slot.spell1 ?? 0,
+    spell2Id: slot.spell2 ?? 0,
+    skinId: slot.skinId ?? 0,
+  };
 }
 
 /** Current role selector state, or null when we are not in a lobby at all. */
@@ -113,6 +182,7 @@ export async function readPositions(lcu: LcuClient): Promise<LobbyPositions | nu
       second: (lobby.localMember?.secondPositionPreference || "UNSELECTED") as PositionPreference,
       selectable: Boolean(lobby.gameConfig?.showPositionSelector),
       queueId: lobby.gameConfig?.queueId ?? 0,
+      slots: (lobby.localMember?.playerSlots ?? []).map(toLobbySlot),
       // Resolved by the session, which holds the id-to-name cache; naming it
       // here would mean another round trip on every lobby event.
       queueName: "",

@@ -200,6 +200,20 @@ export interface CustomGame {
   maxSpectators: number;
 }
 
+/**
+ * One of Swiftplay's pre-picked champions, chosen in the lobby rather than in
+ * champ select. The slot's rune page is deliberately not in this contract —
+ * nothing here edits it, and the agent preserves it across a write.
+ */
+export interface LobbySlot {
+  championId: number;
+  /** "TOP", "UTILITY", … or "" when the slot has no role attached. */
+  positionPreference: string;
+  spell1Id: number;
+  spell2Id: number;
+  skinId: number;
+}
+
 export interface LobbyPositions {
   first: PositionPreference;
   second: PositionPreference;
@@ -207,6 +221,12 @@ export interface LobbyPositions {
   queueId: number;
   /** Resolved mode name, e.g. "ARAM"; empty outside a lobby. */
   queueName: string;
+  /**
+   * Swiftplay's pre-picked champions. Empty in every mode that does not offer
+   * them, which is how the picker decides whether to appear — the client
+   * advertises no flag for it.
+   */
+  slots: LobbySlot[];
 }
 
 /** Which fallback supplies runes for a champion you never configured. */

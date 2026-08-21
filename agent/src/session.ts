@@ -658,6 +658,9 @@ export class Session extends EventEmitter {
       selectable: this.state.lobby?.selectable ?? true,
       queueId: this.state.lobby?.queueId ?? 0,
       queueName: this.state.lobby?.queueName ?? "",
+      // Untouched by a role change, and dropping them here would blank the
+      // Swiftplay picker for the beat before the lobby event lands.
+      slots: this.state.lobby?.slots ?? [],
     };
     this.log(`Set roles to ${titleCase(first)} / ${titleCase(second)}.`);
     this.publish();
