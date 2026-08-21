@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Gamepad2, Loader2, QrCode } from "lucide-react";
 import { PairingCard } from "./components/PairingCard";
 import { StatusCard } from "./components/StatusCard";
+import { UpdateBanner } from "./components/UpdateBanner";
+import type { UpdateStatus } from "../../main/updateCheck";
 import { ActivityLog } from "./components/ActivityLog";
 import type { AgentState } from "../../../../agent/src/types";
 
@@ -23,6 +25,7 @@ export default function App() {
   const [connectedPhones, setConnectedPhones] = useState(0);
   const [connectedClients, setConnectedClients] = useState<{ kind: string; label: string }[]>([]);
   const [servingWebApp, setServingWebApp] = useState(false);
+  const [update, setUpdate] = useState<UpdateStatus | null>(null);
   const [tab, setTab] = useState<Tab>(loadTab);
 
   useEffect(() => {
@@ -40,6 +43,7 @@ export default function App() {
       setState(push.state);
       setConnectedPhones(push.connectedPhones);
       setConnectedClients(push.connectedClients);
+      setUpdate(push.update);
     });
   }, []);
 
@@ -89,6 +93,8 @@ export default function App() {
                 setPairingCode(next);
               }}
             />
+
+            <UpdateBanner update={update} />
 
             <StatusCard state={state} connectedPhones={connectedPhones} connectedClients={connectedClients} />
 

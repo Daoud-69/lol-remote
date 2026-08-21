@@ -12,6 +12,8 @@ import {
   SERVER_PORT,
 } from "../../../agent/src/config.js";
 import type { AgentState } from "../../../agent/src/types.js";
+import pkg from "../../package.json";
+import { checkForUpdate, UPDATE_CHECK_INTERVAL_MS, type UpdateStatus } from "./updateCheck.js";
 
 // Packaged, __dirname is inside app.asar and build/ is not in there — the icon
 // ships as an extraResource instead (see electron-builder.yml). Running from
@@ -49,6 +51,11 @@ if (!app.requestSingleInstanceLock()) {
     registerIpc(session);
     createTray();
     createWindow();
+
+    // Deliberately after the window: the check reaches the internet, and
+    // nothing about starting the agent should wait on GitHub answering.
+    void refreshUpdateStatus();
+    setInterval(() => void refreshUpdateStatus(), UPDATE_CHECK_INTERVAL_MS);
   });
 }
 
@@ -136,6 +143,7 @@ function pushState(session: Session): void {
     state: session.getState(),
     connectedPhones: serverHandle?.getConnectedPhoneCount() ?? 0,
     connectedClients: serverHandle?.getConnectedClients() ?? [],
+    update: updateStatus,
   } satisfies AgentPush);
 }
 
@@ -148,6 +156,7 @@ function registerIpc(session: Session): void {
     connectedPhones: serverHandle?.getConnectedPhoneCount() ?? 0,
     connectedClients: serverHandle?.getConnectedClients() ?? [],
     servingWebApp: serverHandle?.servingWebApp ?? false,
+    update: updateStatus,
   }));
 
   ipcMain.handle("agent:regenerateCode", () => regeneratePairingCode());
@@ -177,6 +186,32 @@ export interface AgentPush {
   connectedPhones: number;
   /** What is attached, so the window can name each remote rather than count them. */
   connectedClients: { kind: string; label: string }[];
+  /** Rides the regular push: the check finishes after the window asks, and a
+   *  one-shot event would land before the renderer was listening. */
+  update: UpdateStatus;
+}
+
+/**
+ * The running version, baked in at build time rather than asked of Electron.
+ *
+ * `app.getVersion()` reports the app's version only once packaged; from source
+ * it answers with Electron's own, which would have the update check comparing
+ * 43.4.0 against 1.6.1 and declaring itself years ahead.
+ */
+const APP_VERSION = pkg.version;
+
+let updateStatus: UpdateStatus = {
+  current: APP_VERSION,
+  latest: null,
+  url: "https://github.com/Daoud-69/lol-remote/releases/latest",
+  outdated: false,
+};
+
+async function refreshUpdateStatus(): Promise<void> {
+  updateStatus = await checkForUpdate(APP_VERSION);
+  if (updateStatus.outdated) {
+    console.log(`[agent] Update available: ${updateStatus.latest} (running ${APP_VERSION})`);
+  }
 }
 
 app.on("window-all-closed", () => {

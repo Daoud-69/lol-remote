@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { AgentPush } from "../main/index.js";
 import type { AgentState } from "../../../agent/src/types.js";
+import type { UpdateStatus } from "../main/updateCheck.js";
 
 export interface AgentInfo {
   pairingCode: string;

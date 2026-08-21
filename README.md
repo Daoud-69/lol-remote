@@ -36,9 +36,10 @@ Neither download needs the source. Clone the repo only if you want to build it y
   you made, and add somebody by Riot ID
 - Accept / decline the ready check (full-screen takeover + alarm + vibration + a system notification)
 - Pick your two lobby roles — the same selector the client shows, driven from the phone
-- **Swiftplay's champions, from the lobby** — that mode picks champions before the game rather than
-  in champ select, so the phone shows the slots the client is holding and lets you change who is in
-  each one
+- **Swiftplay's loadouts, from the lobby** — that mode picks champions before the game rather than in
+  champ select, and asks for a whole loadout per slot: champion, role, both spells, a skin and a rune
+  page. All five are editable from the phone, and only champions the account can actually field are
+  offered
 - Pick and ban by tapping — a champion you tap is hovered in the client straight away, so the team
   sees it without a second press. Locking keeps a button of its own, being the half you cannot take
   back
@@ -102,11 +103,10 @@ owns.
 ### 1. Agent (on the gaming PC)
 
 **[`desktop/`](desktop) is the app to install** — a proper Windows program with its own window: a
-pairing QR code with the address and pairing code beside it, live League-client status, a
-a list of whatever remotes are attached — named, not counted — and an activity feed, styled to match
-the [`web/`](web) remote control.
-Minimizes to the tray instead of quitting, so closing the window doesn't drop your phone's
-connection.
+pairing QR code with the address and pairing code beside it, live League-client status, a list of
+whatever remotes are attached — named, not counted — a banner when a newer release is out, and an
+activity feed, styled to match the [`web/`](web) remote control. Minimizes to the tray instead of
+quitting, so closing the window doesn't drop your phone's connection.
 
 If the PC has more than one network address — Ethernet and Wi-Fi, or a VM's virtual adapter — they
 are all listed and you can tap one to point the QR at it. Only you know which network the phone is
@@ -418,6 +418,24 @@ Once a link has been used the code is stripped from the address bar with `replac
 not linger in history or in a saved home-screen shortcut. A link in the address bar also outranks a
 remembered connection — re-scanning after regenerating the code is how you'd fix a phone stuck on
 the old one, and silently restoring the stale connection would defeat that.
+
+**Telling you an update exists.** The agent is a 99 MB installer people run once and then forget, so
+it has to raise this itself — nobody checks a releases page on the off chance. It asks GitHub for the
+latest release tag on startup and every six hours, compares against its own version, and draws a
+banner only when there is genuinely something newer. There is no in-place updater: the installer is
+the update, and the banner opens the release page rather than downloading and running anything by
+itself.
+
+It is quiet on every failure. No network, rate-limited, a tag that does not parse — all report
+"unknown" and draw nothing, because an agent that complains when the Wi-Fi drops teaches people to
+ignore it.
+
+Two things to know. The version is baked in from package.json at build time rather than read from
+, which answers with Electron own version when running from source — the check
+would otherwise compare 43.4.0 against 1.6.1 and believe itself years ahead. And the status rides
+the regular two-second push rather than a one-shot event: the check finishes after the window has
+already asked for its state, so a single event fires before the renderer is listening and the banner
+never appears. That was a real bug, found by looking at the window rather than the log.
 
 **Naming what connected.** The window used to say "Phone: 2 connected", which is wrong the moment one
 of them is a browser on the same desk as the agent. The remote now says what it is on the socket URL,
