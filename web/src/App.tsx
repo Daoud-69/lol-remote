@@ -176,7 +176,7 @@ export default function App() {
 
             {/* Desktop main column: live visualizer, auto-switches to champ select. */}
             <main className="hidden lg:block space-y-6">
-              <StatusPanel state={state} status={status} connection={connection} onToast={showToast} />
+              <StatusPanel state={state} status={status} connection={connection} champions={champions} spells={spells} onToast={showToast} />
               <AnimatePresence>
                 {state.champSelect && (
                   <motion.div
@@ -197,7 +197,7 @@ export default function App() {
               <AnimatePresence mode="wait">
                 {tab === "status" && (
                   <motion.div key="status" initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 12 }} transition={{ duration: 0.25 }}>
-                    <StatusPanel state={state} status={status} connection={connection} onToast={showToast} />
+                    <StatusPanel state={state} status={status} connection={connection} champions={champions} spells={spells} onToast={showToast} />
                   </motion.div>
                 )}
                 {tab === "select" && (

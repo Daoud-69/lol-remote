@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { ChevronRight, Loader2, Lock, RefreshCw, Search, Swords } from "lucide-react";
-import type { CustomGame, GameQueue } from "../types";
-import { api, type Connection } from "../lib/api";
+import type { Champion, CustomGame, GameQueue, LobbyPositions, SummonerSpell } from "../types";
+import { api, championIconUrl, type Connection } from "../lib/api";
 import { Badge, Card, SectionTitle } from "./ui/primitives";
 import { Sheet } from "./ui/Sheet";
+import { SwiftplayLoadout } from "./SwiftplaySlots";
 
 /**
  * The client's play menu, on a phone.
@@ -63,18 +64,25 @@ function group(queues: GameQueue[]): { label: string; queues: GameQueue[] }[] {
 
 export function ModePicker({
   connection,
+  lobby,
+  champions,
+  spells,
   currentQueueId,
   currentQueueName,
   canChange,
   onToast,
 }: {
   connection: Connection;
+  lobby: LobbyPositions | null;
+  champions: Champion[];
+  spells: SummonerSpell[];
   currentQueueId: number;
   currentQueueName: string;
   canChange: boolean;
   onToast: (message: string, kind: "ok" | "error") => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [loadoutOpen, setLoadoutOpen] = useState(false);
   const [tab, setTab] = useState<TabId>("pvp");
   const [queues, setQueues] = useState<GameQueue[] | null>(null);
   const [busy, setBusy] = useState("");
@@ -100,13 +108,19 @@ export function ModePicker({
     };
   }, [open, connection, onToast]);
 
-  const act = (key: string, run: () => Promise<unknown>, success: string) => {
+  const act = <T,>(
+    key: string,
+    run: () => Promise<T>,
+    success: string,
+    then?: (result: T) => void,
+  ) => {
     setBusy(key);
     void run()
-      .then(() => {
+      .then((result) => {
         onToast(success, "ok");
         setOpen(false);
         setConfiguring(null);
+        then?.(result);
       })
       .catch((error: Error) => onToast(error.message, "error"))
       .finally(() => setBusy(""));
@@ -137,6 +151,37 @@ export function ModePicker({
         </span>
         <ChevronRight className="h-4 w-4 text-ink-dim shrink-0" />
       </button>
+
+      {/* A way back in once the mode is already set — the loadout is worth
+          revisiting between games, and re-picking the mode to reach it would
+          mean rebuilding a lobby that is already correct. */}
+      {(lobby?.slots.length ?? 0) > 0 && (
+        <button
+          type="button"
+          onClick={() => setLoadoutOpen(true)}
+          className="mt-3 flex w-full items-center gap-3 rounded-xl border border-hairline bg-white/[0.03] p-2 text-left transition-colors hover:border-hextech/40"
+        >
+          <span className="flex shrink-0 -space-x-2">
+            {(lobby?.slots ?? []).map((slot, index) =>
+              slot.championId > 0 ? (
+                <img
+                  key={index}
+                  src={championIconUrl(connection, slot.championId)}
+                  alt=""
+                  className="h-8 w-8 rounded-lg border border-obsidian bg-obsidian-raised"
+                />
+              ) : (
+                <span
+                  key={index}
+                  className="h-8 w-8 rounded-lg border border-dashed border-hairline bg-obsidian-raised"
+                />
+              ),
+            )}
+          </span>
+          <span className="min-w-0 flex-1 text-xs font-semibold text-ink">Your champions</span>
+          <ChevronRight className="h-4 w-4 shrink-0 text-ink-dim" />
+        </button>
+      )}
 
       <Sheet
         open={open}
@@ -246,10 +291,25 @@ export function ModePicker({
                               );
                               return;
                             }
+                            // Already in this mode: there is no lobby to
+                            // create, so go straight to its loadout rather
+                            // than making the client rebuild what it has.
+                            if (queue.id === currentQueueId && (lobby?.slots.length ?? 0) > 0) {
+                              setOpen(false);
+                              setLoadoutOpen(true);
+                              return;
+                            }
                             act(
                               `queue-${queue.id}`,
                               () => api.setQueue(connection, queue.id),
                               `${queue.name} lobby created.`,
+                              // Swiftplay is not picked until its champions
+                              // are, so the mode sheet hands straight over to
+                              // the loadout instead of closing on a job half
+                              // done. Modes without slots just close.
+                              (result) => {
+                                if ((result?.slots.length ?? 0) > 0) setLoadoutOpen(true);
+                              },
                             );
                           }}
                         />
@@ -262,6 +322,16 @@ export function ModePicker({
           </div>
         )}
       </Sheet>
+
+      <SwiftplayLoadout
+        open={loadoutOpen}
+        onClose={() => setLoadoutOpen(false)}
+        slots={lobby?.slots ?? []}
+        connection={connection}
+        champions={champions}
+        spells={spells}
+        onToast={onToast}
+      />
     </Card>
   );
 }

@@ -1,14 +1,14 @@
 import { useEffect, useState } from "react";
 import { Swords } from "lucide-react";
 import { api, championIconUrl, spellIconUrl, type Connection } from "../lib/api";
-import type { Champion, LobbyPositions, LobbySlot, RunePage, Skin, SummonerSpell } from "../types";
+import type { Champion, LobbySlot, RunePage, Skin, SummonerSpell } from "../types";
 import { POSITIONS } from "../types";
 import { ChampionGrid } from "./ChampionGrid";
 import { RuneEditor } from "./RuneEditor";
 import { SkinCarousel } from "./SkinCarousel";
 import { SpellPicker } from "./SpellPicker";
 import { Sheet } from "./ui/Sheet";
-import { Card, Muted, SectionTitle } from "./ui/primitives";
+import { Muted } from "./ui/primitives";
 import { positionLabel } from "./RolePicker";
 
 type SlotTab = "champion" | "skin" | "runes" | "spells";
@@ -29,19 +29,27 @@ const TABS: { id: SlotTab; label: string }[] = [
  * an editor with tabs rather than a champion picker: picking the champion and
  * leaving the other four to the PC would only half-move the job to the phone.
  *
- * How many slots there are comes from the client too. The card renders whatever
- * the lobby reports and disappears entirely where it reports none, which is how
- * it stays out of every other mode — there is no flag saying "this mode has
- * slots" to check instead.
+ * It opens from the mode picker, off the back of choosing Swiftplay, because
+ * that is when the question is actually being asked — the client will not queue
+ * without an answer, and a settings screen you have to know to visit is the
+ * wrong place for something the mode demands before it will start.
+ *
+ * How many slots there are comes from the client. Whether a mode has them at
+ * all is answered by the list being empty, since the client advertises no flag
+ * for it the way it does `showPositionSelector` for roles.
  */
-export function SwiftplaySlots({
-  lobby,
+export function SwiftplayLoadout({
+  open,
+  onClose,
+  slots,
   connection,
   champions,
   spells,
   onToast,
 }: {
-  lobby: LobbyPositions | null;
+  open: boolean;
+  onClose: () => void;
+  slots: LobbySlot[];
   connection: Connection;
   champions: Champion[];
   spells: SummonerSpell[];
@@ -54,7 +62,6 @@ export function SwiftplaySlots({
   const [skinsLoading, setSkinsLoading] = useState(false);
   const [editingSpell, setEditingSpell] = useState<1 | 2>(1);
 
-  const slots = lobby?.slots ?? [];
   const slot: LobbySlot | undefined = editing === null ? undefined : slots[editing];
   const editingChampionId = slot?.championId ?? 0;
 
@@ -83,8 +90,6 @@ export function SwiftplaySlots({
     };
   }, [connection, editingChampionId]);
 
-  if (slots.length === 0) return null;
-
   const championName = (id: number) => champions.find((c) => c.id === id)?.name ?? "";
   const spellIcon = (id: number) => spells.find((s) => s.id === id)?.iconPath ?? "";
 
@@ -104,13 +109,27 @@ export function SwiftplaySlots({
     }
   };
 
-  return (
-    <Card>
-      <SectionTitle accent="hextech">Your champions</SectionTitle>
-      <Muted>Swiftplay picks these in the lobby, before the game starts.</Muted>
+  const editingName = championName(editingChampionId);
 
-      <div className="mt-3 space-y-2">
-        {slots.map((entry, index) => (
+  return (
+    <Sheet
+      open={open}
+      title={
+        editing === null
+          ? "Choose your champions"
+          : `Slot ${editing + 1}${editingName ? ` — ${editingName}` : ""}`
+      }
+      onClose={() => {
+        // Backing out of a slot returns to the list rather than closing the
+        // whole thing — the list is the only way through to the other slot.
+        if (editing !== null) setEditing(null);
+        else onClose();
+      }}
+    >
+      {editing === null ? (
+        <div className="space-y-2">
+          <Muted>Swiftplay picks these before the game starts. Tap one to set it up.</Muted>
+          {slots.map((entry, index) => (
           <button
             key={index}
             type="button"
@@ -154,19 +173,10 @@ export function SwiftplaySlots({
               )}
             </span>
           </button>
-        ))}
-      </div>
-
-      <Sheet
-        open={editing !== null}
-        onClose={() => setEditing(null)}
-        title={
-          editing === null
-            ? ""
-            : `Slot ${editing + 1}${championName(editingChampionId) ? ` — ${championName(editingChampionId)}` : ""}`
-        }
-      >
-        {editing !== null && slot && (
+          ))}
+        </div>
+      ) : (
+        slot && (
           <div className="space-y-3">
             <div className="glass flex gap-1 rounded-[14px] p-1">
               {TABS.map((entry) => (
@@ -272,8 +282,8 @@ export function SwiftplaySlots({
               />
             )}
           </div>
-        )}
-      </Sheet>
-    </Card>
+        )
+      )}
+    </Sheet>
   );
 }

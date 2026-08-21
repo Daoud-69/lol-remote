@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { Gamepad2, Loader2, PlayCircle, Radar, Swords, Wifi, WifiOff } from "lucide-react";
-import type { AgentState, GameflowPhase } from "../../types";
+import type { AgentState, Champion, GameflowPhase, SummonerSpell } from "../../types";
 import type { LinkStatus } from "../../hooks/useAgent";
 import type { Connection } from "../../lib/api";
 import { api, profileIconUrl } from "../../lib/api";
@@ -13,11 +13,15 @@ export function StatusPanel({
   state,
   status,
   connection,
+  champions,
+  spells,
   onToast,
 }: {
   state: AgentState | null;
   status: LinkStatus;
   connection: Connection;
+  champions: Champion[];
+  spells: SummonerSpell[];
   onToast: (message: string, kind: "ok" | "error") => void;
 }) {
   const run = async (action: () => Promise<unknown>, success: string) => {
@@ -67,6 +71,9 @@ export function StatusPanel({
       {clientOk ? (
         <ModePicker
           connection={connection}
+          lobby={state?.lobby ?? null}
+          champions={champions}
+          spells={spells}
           currentQueueId={state?.lobby?.queueId ?? 0}
           currentQueueName={state?.lobby?.queueName ?? ""}
           canChange={state?.phase === "None" || state?.phase === "Lobby" || state?.phase === "Matchmaking"}
