@@ -123,6 +123,22 @@ export interface ChampSelectState {
   } | null;
 }
 
+/**
+ * What kind of thing is holding a remote open.
+ *
+ * There is deliberately no "Windows app" here: the Windows app *is* the agent,
+ * the thing asking the question. What connects to it is the installed Android
+ * app, or a browser — and a browser on a desk is worth telling apart from one
+ * in a hand, since "Phone connected" over a laptop is simply wrong.
+ */
+export type ClientKind = "android-app" | "phone-browser" | "desktop-browser" | "unknown";
+
+export interface ConnectedClient {
+  kind: ClientKind;
+  /** Ready to print: "Android app", "Phone browser", … */
+  label: string;
+}
+
 export interface Champion {
   id: number;
   name: string;

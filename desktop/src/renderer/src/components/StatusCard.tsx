@@ -17,12 +17,33 @@ const PHASE_LABEL: Record<string, string> = {
   TerminatedInError: "Error",
 };
 
+/**
+ * Names what is connected instead of counting it.
+ *
+ * "Phone: 2 connected" was wrong twice over when one of them was a browser on
+ * this very desk. Identical kinds are folded together — "2 phone browsers"
+ * rather than the same words twice — and several different ones are listed,
+ * since which is which is the whole point of asking.
+ */
+function describeClients(clients: { label: string }[]): string {
+  if (clients.length === 0) return "Not connected";
+
+  const counts = new Map<string, number>();
+  for (const client of clients) counts.set(client.label, (counts.get(client.label) ?? 0) + 1);
+
+  return [...counts.entries()]
+    .map(([label, count]) => (count === 1 ? label : `${count} × ${label}`))
+    .join(", ");
+}
+
 export function StatusCard({
   state,
   connectedPhones,
+  connectedClients,
 }: {
   state: AgentState | null;
   connectedPhones: number;
+  connectedClients: { kind: string; label: string }[];
 }) {
   const clientOk = state?.connectedToClient ?? false;
 
@@ -38,8 +59,8 @@ export function StatusCard({
         />
         <Row
           icon={<Smartphone className="h-4 w-4" />}
-          label="Phone"
-          value={connectedPhones > 0 ? `${connectedPhones} connected` : "Not connected"}
+          label={connectedPhones === 1 ? "Remote" : "Remotes"}
+          value={describeClients(connectedClients)}
           dot={connectedPhones > 0 ? "hextech" : "dim"}
         />
       </div>

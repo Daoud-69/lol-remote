@@ -1,3 +1,4 @@
+import { Capacitor } from "@capacitor/core";
 import type {
   AutomationPatch,
   AutomationSettings,
@@ -83,8 +84,28 @@ export function sameConnection(a: Connection | null, b: Connection | null): bool
   return a?.host === b?.host && a?.port === b?.port && a?.code === b?.code;
 }
 
+/**
+ * Says what this remote is, so the agent window can name it rather than call
+ * every socket a phone.
+ *
+ * Asked of Capacitor rather than inferred from the user agent, because only
+ * the app itself knows: its WebView sends a string a browser could also send.
+ * A browser leaves the guess to the agent, which has the user agent and can at
+ * least tell a hand from a desk.
+ */
+function clientKind(): string {
+  try {
+    return Capacitor.isNativePlatform() ? "android-app" : "browser";
+  } catch {
+    return "browser";
+  }
+}
+
 export function socketUrl(connection: Connection): string {
-  return `ws://${connection.host}:${connection.port}/ws?code=${encodeURIComponent(connection.code)}`;
+  return (
+    `ws://${connection.host}:${connection.port}/ws` +
+    `?code=${encodeURIComponent(connection.code)}&client=${clientKind()}`
+  );
 }
 
 /** Asset URLs, proxied through the agent straight from the League client — no Data Dragon, never stale. */

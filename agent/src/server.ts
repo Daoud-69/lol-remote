@@ -23,7 +23,9 @@ import {
 } from "./lcu/actions.js";
 import { listPages, readCatalog, recommendedPages } from "./lcu/runes.js";
 import { RUNE_SOURCES } from "./runeSource.js";
+import { classifyClient } from "./clientKind.js";
 import type {
+  ConnectedClient,
   LobbySlotPatch,
   PositionPreference,
   RunePage,
@@ -49,6 +51,8 @@ const SWAP_NOUN: Record<SwapKind, string> = {
 
 export interface ServerHandle {
   getConnectedPhoneCount: () => number;
+  /** What is actually attached, so the window can say so instead of guessing. */
+  getConnectedClients: () => ConnectedClient[];
   /** True when a web/dist build was found and is being served at "/". */
   servingWebApp: boolean;
 }
@@ -636,6 +640,7 @@ export async function startServer(
   // connection — not worth the friction for the common case.
   const server = http.createServer(app);
   const wss = new WebSocketServer({ noServer: true });
+  const clients = new Map<WebSocket, ConnectedClient>();
 
   server.on("upgrade", (request, socket, head) => {
     const url = new URL(request.url ?? "/", "http://localhost");
@@ -651,8 +656,18 @@ export async function startServer(
     wss.handleUpgrade(request, socket, head, (ws) => wss.emit("connection", ws, request));
   });
 
-  wss.on("connection", (ws: WebSocket) => {
-    session.log("A phone connected.");
+  wss.on("connection", (ws: WebSocket, request: http.IncomingMessage) => {
+    // Kept beside the socket rather than on it, so a client that drops takes
+    // its entry with it and the count cannot drift from what is really open.
+    const url = new URL(request.url ?? "/", "http://localhost");
+    const client = classifyClient(
+      url.searchParams.get("client"),
+      request.headers["user-agent"] ?? "",
+    );
+    clients.set(ws, client);
+    ws.once("close", () => clients.delete(ws));
+
+    session.log(`${client.label} connected.`);
     send(ws, { type: "state", state: session.getState() });
 
     const keepAlive = setInterval(() => {
@@ -675,7 +690,16 @@ export async function startServer(
     console.log(`[agent] Listening on port ${SERVER_PORT}`);
   });
 
-  return { getConnectedPhoneCount: () => wss.clients.size, servingWebApp };
+  return {
+    getConnectedPhoneCount: () => wss.clients.size,
+    // Read off the live socket set rather than the map, so a socket that
+    // closed without firing its handler cannot leave a ghost in the list.
+    getConnectedClients: () =>
+      [...wss.clients]
+        .filter((ws) => ws.readyState === WebSocket.OPEN)
+        .map((ws) => clients.get(ws) ?? { kind: "unknown" as const, label: "Unknown device" }),
+    servingWebApp,
+  };
 }
 
 /**

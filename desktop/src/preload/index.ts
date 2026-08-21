@@ -8,6 +8,7 @@ export interface AgentInfo {
   port: number;
   state: AgentState;
   connectedPhones: number;
+  connectedClients: { kind: string; label: string }[];
   servingWebApp: boolean;
 }
 

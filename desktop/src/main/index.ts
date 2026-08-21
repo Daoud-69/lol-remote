@@ -135,6 +135,7 @@ function pushState(session: Session): void {
   mainWindow.webContents.send("agent:state", {
     state: session.getState(),
     connectedPhones: serverHandle?.getConnectedPhoneCount() ?? 0,
+    connectedClients: serverHandle?.getConnectedClients() ?? [],
   } satisfies AgentPush);
 }
 
@@ -145,6 +146,7 @@ function registerIpc(session: Session): void {
     port: SERVER_PORT,
     state: session.getState(),
     connectedPhones: serverHandle?.getConnectedPhoneCount() ?? 0,
+    connectedClients: serverHandle?.getConnectedClients() ?? [],
     servingWebApp: serverHandle?.servingWebApp ?? false,
   }));
 
@@ -173,6 +175,8 @@ function registerIpc(session: Session): void {
 export interface AgentPush {
   state: AgentState;
   connectedPhones: number;
+  /** What is attached, so the window can name each remote rather than count them. */
+  connectedClients: { kind: string; label: string }[];
 }
 
 app.on("window-all-closed", () => {

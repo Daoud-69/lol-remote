@@ -21,6 +21,7 @@ export default function App() {
   const [port, setPort] = useState(8777);
   const [state, setState] = useState<AgentState | null>(null);
   const [connectedPhones, setConnectedPhones] = useState(0);
+  const [connectedClients, setConnectedClients] = useState<{ kind: string; label: string }[]>([]);
   const [servingWebApp, setServingWebApp] = useState(false);
   const [tab, setTab] = useState<Tab>(loadTab);
 
@@ -31,12 +32,14 @@ export default function App() {
       setPort(info.port);
       setState(info.state);
       setConnectedPhones(info.connectedPhones);
+      setConnectedClients(info.connectedClients);
       setServingWebApp(info.servingWebApp);
     });
 
     return window.api.onState((push) => {
       setState(push.state);
       setConnectedPhones(push.connectedPhones);
+      setConnectedClients(push.connectedClients);
     });
   }, []);
 
@@ -87,7 +90,7 @@ export default function App() {
               }}
             />
 
-            <StatusCard state={state} connectedPhones={connectedPhones} />
+            <StatusCard state={state} connectedPhones={connectedPhones} connectedClients={connectedClients} />
 
             <ActivityLog log={state?.log ?? []} />
 

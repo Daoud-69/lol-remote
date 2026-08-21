@@ -103,7 +103,8 @@ owns.
 
 **[`desktop/`](desktop) is the app to install** — a proper Windows program with its own window: a
 pairing QR code with the address and pairing code beside it, live League-client status, a
-connected-phone indicator, and an activity feed, styled to match the [`web/`](web) remote control.
+a list of whatever remotes are attached — named, not counted — and an activity feed, styled to match
+the [`web/`](web) remote control.
 Minimizes to the tray instead of quitting, so closing the window doesn't drop your phone's
 connection.
 
@@ -417,6 +418,17 @@ Once a link has been used the code is stripped from the address bar with `replac
 not linger in history or in a saved home-screen shortcut. A link in the address bar also outranks a
 remembered connection — re-scanning after regenerating the code is how you'd fix a phone stuck on
 the old one, and silently restoring the stale connection would defeat that.
+
+**Naming what connected.** The window used to say "Phone: 2 connected", which is wrong the moment one
+of them is a browser on the same desk as the agent. The remote now says what it is on the socket URL,
+because only it knows: Capacitor answers that directly, where the user agent cannot separate the
+installed Android app from Chrome on the same phone with any confidence. The agent falls back to the
+`User-Agent` for anything that does not announce itself, checking the handheld markers before the
+desktop ones — an Android agent also contains "Linux" and an iPad's can contain "Macintosh", so
+testing for a desktop first files half the phones on the network as laptops.
+
+There is deliberately no "Windows app" among the kinds. The Windows app *is* the agent, the thing
+asking the question; what connects to it is the Android app or a browser.
 
 **Finding the client.** `credentials.ts` queries `Win32_Process` for `LeagueClientUx.exe` and pulls
 `--app-port` and `--remoting-auth-token` off its command line, falling back to the `lockfile` in the
