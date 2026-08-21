@@ -184,6 +184,15 @@ export class Session extends EventEmitter {
           this.resetChampSelectFlags();
         }
 
+        // Leaving the ready check drops it, whether or not the client bothered
+        // to send a Delete for it. Only on the way out: the phase event and the
+        // ready-check event race, and clearing on any non-ReadyCheck phase
+        // would throw away a check that arrived a beat before the phase caught
+        // up.
+        if (previous === "ReadyCheck" && this.state.phase !== "ReadyCheck") {
+          this.state.readyCheck = null;
+        }
+
         // The moment the client stops being something you can drive from the
         // phone and starts being something you have to be sat at the keyboard
         // for.
@@ -247,7 +256,14 @@ export class Session extends EventEmitter {
       playerResponse: string;
       timer: number;
     };
-    const wasPending = this.state.readyCheck?.state === "InProgress";
+    // "Was it waiting on an answer", not merely "was there a check" — the
+    // client leaves state on InProgress after you accept and does not reliably
+    // send a Delete afterwards, so a check answered earlier stays in this state
+    // looking pending. Reading only `state` meant the second queue pop of a
+    // session, and every one after it, was treated as already-announced and
+    // rang nothing.
+    const previous = this.state.readyCheck;
+    const wasPending = previous?.state === "InProgress" && previous.playerResponse === "None";
     this.state.readyCheck = {
       state: data.state,
       playerResponse: data.playerResponse,

@@ -725,10 +725,10 @@ client, and the derived URLs confirmed against it (a real route answers `RPC_ERR
 delegate" outside champ select, where an invented one answers `RESOURCE_NOT_FOUND` / "Invalid URI
 format"). Driven through the actual UI against a captured draft holding one swap in each state:
 
-- The card shows an incoming request with Accept and Decline, an outgoing one with Cancel, and the
-  teammates who could be asked — and each button sends the right kind, id and verb
-  (`accept`/`decline` on the position swap it was drawn for, `cancel` on the pick-order one, and
-  `request` on the teammate actually tapped)
+- The card shows an incoming request with Accept and Decline, an outgoing one with Cancel, and one
+  row per teammate who could be asked. Tapping a teammate opens a sheet offering only the kinds
+  actually available for *them* — a teammate with both gets "Swap roles" and "Swap pick order", one
+  with a single kind left gets only that — and each button sends the right kind, id and verb
 - `BUSY` and `DECLINED` entries render nothing at all, rather than a button the client would refuse
 - The route refuses a bad kind, a bad action, a missing id, and an id the client is not currently
   offering, each with a sentence rather than a status code

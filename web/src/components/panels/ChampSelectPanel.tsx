@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Ban, Sword } from "lucide-react";
+import { Ban, ChevronRight, Sword } from "lucide-react";
 import { api, championIconUrl, skinSplashUrl, type Connection } from "../../lib/api";
 import type {
   AgentState,
@@ -16,6 +16,7 @@ import { ChampionGrid } from "../ChampionGrid";
 import { SkinCarousel } from "../SkinCarousel";
 import { SpellPicker } from "../SpellPicker";
 import { Button } from "../ui/Button";
+import { Sheet } from "../ui/Sheet";
 import { Card, SectionTitle, Muted } from "../ui/primitives";
 
 type Tab = "champion" | "spells" | "skin";
@@ -528,11 +529,14 @@ function actionableSwaps(swaps: TeamSwap[]): TeamSwap[] {
 /**
  * Role and pick-order trades with your own team.
  *
- * Incoming requests are pulled to the top and given the loud treatment because
- * they are the only half that expires — a teammate is waiting on an answer,
- * where an offer you might make can sit there all draft. Offers you have sent
- * come next so there is something to cancel, and the rest is the list of people
- * you could ask.
+ * One row per teammate rather than one per swap: a teammate is the thing you
+ * think about ("get me off support"), and the kind is a detail you choose
+ * after. Listing every kind for every player flattened that into a wall of
+ * near-identical chips where the two lines that mattered — who is asking, and
+ * who you could ask — were the hardest to find.
+ *
+ * Incoming requests keep their own block above the list, because they are the
+ * only half that expires while you look at it.
  */
 function SwapCard({
   select,
@@ -547,52 +551,61 @@ function SwapCard({
   busy: boolean;
   onAct: (swap: TeamSwap, action: SwapAction) => void;
 }) {
-  const swaps = actionableSwaps(select.swaps);
-  if (swaps.length === 0) return null;
+  const [asking, setAsking] = useState<number | null>(null);
 
+  const swaps = actionableSwaps(select.swaps);
   const incoming = swaps.filter((swap) => swap.state === "RECEIVED");
   const sent = swaps.filter((swap) => swap.state === "SENT");
   const offerable = swaps.filter((swap) => swap.state === "AVAILABLE");
 
-  const describe = (swap: TeamSwap): string => {
-    const mate = select.myTeam.find((slot) => slot.cellId === swap.cellId);
+  const mateOf = (cellId: number) => select.myTeam.find((slot) => slot.cellId === cellId);
+
+  const describe = (cellId: number): string => {
+    const mate = mateOf(cellId);
     const championId = mate ? mate.championId || mate.championPickIntent : 0;
     const name = championId ? champions.find((c) => c.id === championId)?.name : "";
-    const role = mate?.assignedPosition ? positionLabel(mate.assignedPosition) : "";
-    return name || role || "a teammate";
+    return name || (mate?.assignedPosition ? positionLabel(mate.assignedPosition) : "") || "A teammate";
   };
 
-  const mateIcon = (swap: TeamSwap) => {
-    const mate = select.myTeam.find((slot) => slot.cellId === swap.cellId);
+  const mateIcon = (cellId: number, size = "h-9 w-9") => {
+    const mate = mateOf(cellId);
     const championId = mate ? mate.championId || mate.championPickIntent : 0;
     return championId ? (
       <img
         src={championIconUrl(connection, championId)}
         alt=""
-        className="h-9 w-9 shrink-0 rounded-lg bg-obsidian-raised"
+        className={`${size} shrink-0 rounded-lg bg-obsidian-raised`}
       />
     ) : (
-      <div className="h-9 w-9 shrink-0 rounded-lg border border-dashed border-hairline bg-obsidian-raised" />
+      <div className={`${size} shrink-0 rounded-lg border border-dashed border-hairline bg-obsidian-raised`} />
     );
   };
+
+  // The people you could ask, each carrying whichever kinds are on offer for
+  // them — which is not always both.
+  const askable = [...new Set(offerable.map((swap) => swap.cellId))].map((cellId) => ({
+    cellId,
+    kinds: offerable.filter((swap) => swap.cellId === cellId),
+  }));
+
+  if (swaps.length === 0) return null;
+
+  const askingKinds = asking === null ? [] : (askable.find((a) => a.cellId === asking)?.kinds ?? []);
 
   return (
     <Card>
       <SectionTitle accent={incoming.length > 0 ? "gold" : "dim"}>Swaps</SectionTitle>
 
       {incoming.map((swap) => (
-        // Buttons on their own row rather than beside the name: at phone width
-        // an icon, a sentence and two buttons do not fit, and the half that got
-        // squeezed was the sentence saying who is asking and for what.
         <div
           key={`${swap.kind}-${swap.id}`}
           className="mb-3 rounded-xl border border-gold/60 bg-gold/[0.06] p-2.5"
         >
           <div className="flex items-center gap-3">
-            {mateIcon(swap)}
+            {mateIcon(swap.cellId)}
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-semibold text-ink">
-                {describe(swap)} wants to swap
+                {describe(swap.cellId)} wants to swap
               </span>
               <span className="block text-[11px] text-ink-dim">{SWAP_LABEL[swap.kind]}</span>
             </span>
@@ -625,9 +638,9 @@ function SwapCard({
           key={`${swap.kind}-${swap.id}`}
           className="mb-2 flex items-center gap-3 rounded-xl border border-hairline bg-white/[0.03] p-2.5"
         >
-          {mateIcon(swap)}
+          {mateIcon(swap.cellId)}
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm text-ink">Asked {describe(swap)}</span>
+            <span className="block truncate text-sm text-ink">Asked {describe(swap.cellId)}</span>
             <span className="block text-[11px] text-ink-dim">
               {SWAP_LABEL[swap.kind]} — waiting for an answer
             </span>
@@ -638,31 +651,64 @@ function SwapCard({
         </div>
       ))}
 
-      {offerable.length > 0 && (
+      {askable.length > 0 && (
         <>
           {(incoming.length > 0 || sent.length > 0) && <div className="my-3 h-px bg-hairline" />}
-          <p className="mb-2 text-[11px] text-ink-dim">Ask a teammate to swap</p>
-          <div className="flex flex-wrap gap-2">
-            {offerable.map((swap) => (
-              <button
-                key={`${swap.kind}-${swap.id}`}
-                type="button"
-                disabled={busy}
-                onClick={() => onAct(swap, "request")}
-                className="flex items-center gap-2 rounded-xl border border-hairline bg-white/[0.03] py-1.5 pl-1.5 pr-3 text-left transition-colors hover:border-white/25 disabled:opacity-50"
-              >
-                {mateIcon(swap)}
-                <span className="min-w-0">
-                  <span className="block truncate text-xs font-semibold text-ink">
-                    {describe(swap)}
+          <p className="mb-2 text-[11px] text-ink-dim">Tap a teammate to ask for a swap</p>
+          <div className="space-y-2">
+            {askable.map(({ cellId }) => {
+              const mate = mateOf(cellId);
+              return (
+                <button
+                  key={cellId}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setAsking(cellId)}
+                  className="flex w-full items-center gap-3 rounded-xl border border-hairline bg-white/[0.03] p-2 text-left transition-colors hover:border-white/25 disabled:opacity-50"
+                >
+                  {mateIcon(cellId)}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-semibold text-ink">
+                      {describe(cellId)}
+                    </span>
+                    <span className="block text-[11px] text-ink-dim">
+                      {positionLabel(mate?.assignedPosition ?? "") || "No role"}
+                    </span>
                   </span>
-                  <span className="block text-[10px] text-ink-dim">{SWAP_LABEL[swap.kind]}</span>
-                </span>
-              </button>
-            ))}
+                  <ChevronRight className="h-4 w-4 shrink-0 text-ink-dim" />
+                </button>
+              );
+            })}
           </div>
         </>
       )}
+
+      <Sheet
+        open={asking !== null}
+        onClose={() => setAsking(null)}
+        title={asking === null ? "" : `Swap with ${describe(asking)}`}
+      >
+        <div className="space-y-2 pb-2">
+          {askingKinds.map((swap) => (
+            <Button
+              key={`${swap.kind}-${swap.id}`}
+              variant="ghost"
+              size="lg"
+              className="w-full"
+              disabled={busy}
+              onClick={() => {
+                setAsking(null);
+                onAct(swap, "request");
+              }}
+            >
+              {swap.kind === "position" ? "Swap roles" : "Swap pick order"}
+            </Button>
+          ))}
+          {askingKinds.length === 0 && (
+            <Muted>Nothing can be swapped with them right now.</Muted>
+          )}
+        </div>
+      </Sheet>
     </Card>
   );
 }
