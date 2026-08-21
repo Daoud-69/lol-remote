@@ -43,7 +43,10 @@ export function ChampionGrid({
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Search 160+ champions…"
+          // Counted rather than a round number: this grid is sometimes the
+          // whole roster and sometimes only what an account owns, and "160+"
+          // over a list of 47 is a visible lie about what is in front of you.
+          placeholder={`Search ${champions.length} champions…`}
           className="w-full rounded-xl border border-hairline bg-white/[0.03] pl-9 pr-3 py-2.5 text-sm text-ink placeholder:text-ink-dim focus:outline-none focus:border-hextech/50 transition-colors"
         />
       </div>

@@ -119,10 +119,14 @@ export async function startServer(
         if (b) bannable = new Set(b);
       }
 
+      const owned = await readPlayableChampions(lcu);
+
       return champions.map((champion) => ({
         ...champion,
         pickable: pickable ? pickable.has(champion.id) : undefined,
         bannable: bannable ? bannable.has(champion.id) : undefined,
+        playable: owned ? owned.playable.has(champion.id) : undefined,
+        freeToPlay: owned ? owned.free.has(champion.id) : undefined,
       }));
     });
   });
@@ -672,6 +676,47 @@ export async function startServer(
   });
 
   return { getConnectedPhoneCount: () => wss.clients.size, servingWebApp };
+}
+
+/**
+ * The champions this account can actually play: owned outright, plus whatever
+ * is in the current free rotation.
+ *
+ * `owned-champions-minimal` is the list the client itself treats as playable —
+ * a per-queue endpoint exists but answers with the whole catalogue and flags
+ * most of it neither owned nor free, so it is a catalogue rather than a
+ * permission list. Measured on a live account: 47 here against 236 champions in
+ * the game, split 27 owned, 18 rotation, 2 both.
+ *
+ * `disabledQueues` is honoured even though it came back empty everywhere on
+ * that account — it exists so Riot can pull a champion from one mode, and the
+ * day they do, an undisplayable champion is better than a pick that is refused.
+ *
+ * Null when the client will not answer, which callers must read as "unknown"
+ * rather than "nothing playable" — filtering on a failed lookup would empty
+ * the grid.
+ */
+async function readPlayableChampions(
+  lcu: ReturnType<Session["getClient"]>,
+): Promise<{ playable: Set<number>; free: Set<number> } | null> {
+  try {
+    const list = await lcu.get<
+      { id: number; freeToPlay?: boolean; disabledQueues?: string[] }[]
+    >("/lol-champions/v1/owned-champions-minimal");
+    if (!Array.isArray(list) || list.length === 0) return null;
+
+    const playable = new Set<number>();
+    const free = new Set<number>();
+    for (const champion of list) {
+      if (!champion?.id) continue;
+      if ((champion.disabledQueues ?? []).length > 0) continue;
+      playable.add(champion.id);
+      if (champion.freeToPlay) free.add(champion.id);
+    }
+    return { playable, free };
+  } catch {
+    return null;
+  }
 }
 
 // --- Helpers ---------------------------------------------------------------

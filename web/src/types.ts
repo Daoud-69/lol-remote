@@ -99,6 +99,14 @@ export interface Champion {
   alias: string;
   pickable?: boolean;
   bannable?: boolean;
+  /**
+   * True when this account can play the champion right now — owned, or in the
+   * current free rotation. Undefined when the client would not say, which has
+   * to read as "unknown" rather than "no": filtering on it would empty the grid.
+   */
+  playable?: boolean;
+  /** Playable only because of this week's rotation, not because it is owned. */
+  freeToPlay?: boolean;
 }
 
 export interface SummonerSpell {

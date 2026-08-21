@@ -90,6 +90,21 @@ export function SwiftplayLoadout({
     };
   }, [connection, editingChampionId]);
 
+  /**
+   * Only what this account can actually field.
+   *
+   * Champ select can afford to show everything and let the client refuse a
+   * champion you do not have, because it greys out what is unavailable and the
+   * turn timer forgives a mistake. A Swiftplay slot cannot: it is set before
+   * the game and the refusal would arrive as a lobby that will not start. When
+   * the client would not say what is owned, `playable` is undefined and the
+   * whole list stands — an unfiltered grid beats an empty one.
+   */
+  const pickable =
+    champions.some((champion) => champion.playable !== undefined)
+      ? champions.filter((champion) => champion.playable)
+      : champions;
+
   const championName = (id: number) => champions.find((c) => c.id === id)?.name ?? "";
   const spellIcon = (id: number) => spells.find((s) => s.id === id)?.iconPath ?? "";
 
@@ -220,7 +235,7 @@ export function SwiftplayLoadout({
                 </div>
                 <div className="h-[45svh]">
                   <ChampionGrid
-                    champions={champions}
+                    champions={pickable}
                     connection={connection}
                     selectedId={slot.championId}
                     onSelect={(championId) =>

@@ -130,6 +130,17 @@ export interface Champion {
   /** True when the champion is currently pickable by us. */
   pickable?: boolean;
   bannable?: boolean;
+  /**
+   * True when this account can actually play the champion right now — owned
+   * outright or in the current free rotation.
+   *
+   * Undefined rather than false when the client would not say, so a caller can
+   * tell "not playable" from "not known" and show everything rather than an
+   * empty grid.
+   */
+  playable?: boolean;
+  /** Playable only because it is in this week's rotation, not because it is owned. */
+  freeToPlay?: boolean;
 }
 
 export interface SummonerSpell {
