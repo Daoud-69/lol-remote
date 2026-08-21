@@ -36,7 +36,13 @@ Neither download needs the source. Clone the repo only if you want to build it y
   you made, and add somebody by Riot ID
 - Accept / decline the ready check (full-screen takeover + vibration + push notification)
 - Pick your two lobby roles — the same selector the client shows, driven from the phone
-- Hover and lock a champion on your pick turn, or ban on your ban turn
+- Pick and ban by tapping — a champion you tap is hovered in the client straight away, so the team
+  sees it without a second press. Locking keeps a button of its own, being the half you cannot take
+  back
+- **Both teams on one board** — your side with the roles the client assigned, the enemy side named
+  as they commit, and the bans split into yours and theirs rather than pooled into one row. A
+  hovered champion is drawn faded and a locked one solid: an enemy still hovering your counter is a
+  different situation from one who has committed to it
 - Set both summoner spells
 - Pick a skin once you're locked in (owned skins selectable, locked ones shown greyed)
 - Swap from the ARAM/Swiftplay bench
@@ -451,6 +457,19 @@ player's action. `findMyAction` flattens them and finds the one where `actorCell
 champion, and the agent resolves the current action itself, so a stale phone can't lock into the
 wrong slot.
 
+**Reading both teams' bans.** The session carries a `bans` object split into `myTeamBans` and
+`theirTeamBans`, which is the obvious source and is not the only one: every completed ban is also
+sitting in the `actions` array, where `isAllyAction` says whose it was. The two are unioned rather
+than one being a fallback for the other, so a side the client leaves empty still fills in without
+this having to know which of them it decided to populate. A champion can only be banned once per
+game, so a ban already recorded on either side is the same ban seen twice rather than a second one
+— which is what makes the union safe to do blindly.
+
+The enemy team itself needs no such care: `theirTeam` carries their locked champions and arrives
+with the rest of the session. Their `assignedPosition` is empty, though — roles are never revealed
+— which is why the phone captions those slots with the champion's name instead. Modes that hide the
+enemy team outright send an empty array, and the board simply omits that half.
+
 **Which champion to pick.** The agent reads `assignedPosition` off its own slot in `myTeam` and
 takes the first entry from that role's list that nobody has banned or locked. Autofill needs no
 special case: the role the client assigned *is* the lookup key, so being handed support instead of
@@ -537,6 +556,11 @@ Since verified on Windows against a **live League client**, in a real ranked lob
   two trees distinct (Precision/Inspiration Conqueror for Viego, Resolve/Inspiration Guardian for
   Thresh). The guard rejects an eight-perk page, a zero style id and a zero perk id, and an
   unknown source id degrades to "leave it alone" rather than throwing
+- Tap-to-hover and the rune source both driven for real from a phone in a **live Practice Tool**
+  champ select: tapping a champion put it on the slot with no second press, and the runes applied
+  on lock. Practice Tool is also the team-of-one case, which is what proved the slot sizing — a
+  single empty slot used to stretch to the full width of its row and, being square, to an equal
+  height, burying the rest of the board beneath it
 - With one slot free, applying runes creates the page with the exact styles and perks requested and
   makes it current; applying a second champion's runes **reuses the same slot** rather than
   consuming another, and both times the player's own pages came back byte-identical
@@ -650,6 +674,13 @@ QR pairing, verified without a phone in hand:
 - The dev agent prints a scannable terminal QR and the matching link above its pairing banner
 - Agent, web and desktop all typecheck and build clean with it in; lazy-loading the scanner keeps
   the decoder out of the initial bundle, which came down from 483 kB to 386 kB
+
+**Not yet seen in a real draft:** the enemy half of the champ-select board. Practice Tool has no
+opposing team and no bans, so the one mode it has been exercised in is exactly the one that cannot
+show either — the enemy row and the split ban rows have only been driven against captured sessions.
+The parsing they rest on is covered (both sides reported, derived from actions alone, a partial
+report filling in, no double-counting, an empty enemy team), but a real draft is what will say
+whether the client populates those fields when this expects it to.
 
 **Not yet tested with a live client:** bench swap. **Not yet tested on a real phone:** the QR
 itself — neither a camera app scanning the desktop window nor the in-app scanner has been pointed at
