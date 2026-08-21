@@ -34,7 +34,7 @@ Neither download needs the source. Clone the repo only if you want to build it y
   client's own friend groups with create, rename, delete and drag-free move-between. Each friend shows
   the mode they are actually in. Join a party when its owner left it open, invite friends into a lobby
   you made, and add somebody by Riot ID
-- Accept / decline the ready check (full-screen takeover + vibration + push notification)
+- Accept / decline the ready check (full-screen takeover + alarm + vibration + a system notification)
 - Pick your two lobby roles — the same selector the client shows, driven from the phone
 - **Swiftplay's champions, from the lobby** — that mode picks champions before the game rather than
   in champ select, so the phone shows the slots the client is holding and lets you change who is in
@@ -186,38 +186,14 @@ whenever that exists, but it has never been built.
 a home-screen shortcut would then point nowhere. The agent window always shows the current one;
 reserving a fixed address for the PC in your router makes it permanent.
 
-**The Expo client is optional and behind.** [`app/`](app) is an older, hand-written native client.
-It has **not** been updated for role presets, backup picks or runes, and its auto-pick / auto-ban
-controls write settings the agent no longer reads. The Android app above supersedes it. Scaffolded
-on **Expo SDK 57** with dependencies resolved:
-
-```bash
-cd app
-npm install
-npx expo start
-```
-
-Scan the QR code with **Expo Go** on your phone (same Wi-Fi as the PC), then enter the IP, port and
-pairing code from the agent window.
-
-### 3. Push notifications (optional but recommended)
-
-Without this you still get vibration and a full-screen alert *while the app is open*. With it, your
-phone buzzes even with the app closed.
-
-The agent sends the push itself via Expo's service (it has internet even though the phone only
-reaches it over LAN), so no relay server is needed. It just needs a token, which the app registers
-automatically on connect.
-
-- **Android:** works in Expo Go as-is.
-- **iOS:** Expo Go dropped remote push support in SDK 53. You need a development build:
-  ```bash
-  npx eas build --profile development --platform ios
-  ```
-  and an EAS project id filled into `extra.eas.projectId` in `app.json`.
-
-Note this is the [`app/`](app) Expo client's path only — the Android app and the browser get the
-vibration and the full-screen alert, not a push.
+**There used to be a second client.** An Expo one, hand-written separately from [`web/`](web),
+which the installable Android app superseded — same UI as the browser, one codebase instead of two.
+It was removed once it had drifted far enough behind to be a trap rather than an option: it never
+learned role presets, backup picks or runes, and its auto-pick controls wrote settings the agent had
+stopped reading, so it looked like a working client and was not. The Expo push path went with it,
+being the only thing that ever registered for a token. Alerts reach the phone over the WebSocket the
+remote already holds open, and the phone turns them into a sound, a vibration and a system
+notification itself.
 
 ## Project layout
 
@@ -227,7 +203,6 @@ agent/src/
   config.ts             Pairing code and link, saved automation settings, push tokens (~/.lol-remote)
   session.ts            Owns the client connection, live state, automation rules
   server.ts             REST + WebSocket the phone talks to
-  push.ts               Expo push sender
   runeSource.ts         Where runes come from for a champion with no page saved
   types.ts              The agent↔phone contract
   lcu/
@@ -251,11 +226,6 @@ web/android/            Capacitor shell — the installable Android app, same UI
 web/ios/                Capacitor shell for iOS; scaffolded, never built (needs macOS)
 web/public/             Icons and the web manifest that make it installable to a home screen
 
-app/                    Second, Expo-based client — see the note under Setup; not at parity
-  App.tsx               Tab shell, ready-check overlay, toasts
-  src/api.ts            Typed client for the agent
-  src/useAgent.ts       Live WebSocket state with reconnect
-  src/screens/          Connect, Status, ChampSelect, Automation
 
 desktop/src/            Electron shell around agent/src — the app to actually install, see above
   main/index.ts          Starts the same Session + startServer as agent/'s dev entry, plus tray/window/IPC
@@ -271,7 +241,7 @@ desktop/build/          electron-builder inputs: the app icon and the NSIS insta
 ```
 Phone (browser)  ──HTTP + WebSocket──▶  Agent (Node, on your PC)  ──▶  League Client API
        ▲                                        │
-       └────────── Expo push ───────────────────┘   "Queue popped!"
+       └──── alerts, pushed down the socket ────┘   "Match found — accept now!"
 ```
 
 The agent talks to the **LCU** (League Client Update) API — the same local HTTPS API the client's
@@ -766,5 +736,4 @@ shell has never been compiled at all.
 
 - A web manifest, so adding the remote to the home screen gives a real icon and a fullscreen launch
   rather than a bookmark
-- Bring [`app/`](app) up to parity with `web/` (roles, backup picks, runes)
 - Cloud relay so it works off your home Wi-Fi (a small WebSocket server both sides dial out to)

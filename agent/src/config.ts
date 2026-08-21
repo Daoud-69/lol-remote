@@ -12,7 +12,6 @@ export const SERVER_PORT = Number(process.env.LOL_REMOTE_PORT ?? 8777);
 interface StoredConfig {
   pairingCode: string;
   automation: AutomationSettings;
-  pushTokens: string[];
 }
 
 function emptyRolePresets(): Record<Position, RolePreset> {
@@ -83,13 +82,11 @@ function read(): StoredConfig {
     return {
       pairingCode: parsed.pairingCode ?? generatePairingCode(),
       automation: migrate(parsed.automation ?? {}),
-      pushTokens: parsed.pushTokens ?? [],
     };
   } catch {
     return {
       pairingCode: generatePairingCode(),
       automation: DEFAULT_AUTOMATION,
-      pushTokens: [],
     };
   }
 }
@@ -119,7 +116,6 @@ export function getPairingCode(): string {
 export function regeneratePairingCode(): string {
   const next = config();
   next.pairingCode = generatePairingCode();
-  next.pushTokens = []; // Old phones lose access along with the old code.
   write(next);
   return next.pairingCode;
 }
@@ -131,17 +127,6 @@ export function loadAutomation(): AutomationSettings {
 export function saveAutomation(automation: AutomationSettings): void {
   const next = config();
   next.automation = automation;
-  write(next);
-}
-
-export function getPushTokens(): string[] {
-  return config().pushTokens;
-}
-
-export function addPushToken(token: string): void {
-  const next = config();
-  if (next.pushTokens.includes(token)) return;
-  next.pushTokens = [...next.pushTokens, token].slice(-5);
   write(next);
 }
 

@@ -4,8 +4,7 @@ import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { WebSocketServer, WebSocket } from "ws";
 import { Session } from "./session.js";
-import { addPushToken, getPairingCode, SERVER_PORT } from "./config.js";
-import { sendPush } from "./push.js";
+import { getPairingCode, SERVER_PORT } from "./config.js";
 import {
   acceptReadyCheck,
   benchSwap,
@@ -98,16 +97,6 @@ export async function startServer(
 
   app.get("/api/state", (_req, res) => {
     res.json(session.getState());
-  });
-
-  app.post("/api/push-token", (req, res) => {
-    const token = String(req.body?.token ?? "");
-    if (!token.startsWith("ExponentPushToken")) {
-      res.status(400).json({ error: "That is not an Expo push token." });
-      return;
-    }
-    addPushToken(token);
-    res.json({ ok: true });
   });
 
   // --- Catalogs ------------------------------------------------------------
@@ -676,14 +665,7 @@ export async function startServer(
   };
 
   session.on("state", broadcast);
-  session.on("alert", (message: ServerMessage) => {
-    broadcast(message);
-    if (message.type === "alert") {
-      const title =
-        message.kind === "ready-check" ? "Queue popped!" : "League of Legends";
-      void sendPush(title, message.message);
-    }
-  });
+  session.on("alert", broadcast);
 
   server.listen(SERVER_PORT, "0.0.0.0", () => {
     console.log(`[agent] Listening on port ${SERVER_PORT}`);
