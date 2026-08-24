@@ -437,6 +437,21 @@ the regular two-second push rather than a one-shot event: the check finishes aft
 already asked for its state, so a single event fires before the renderer is listening and the banner
 never appears. That was a real bug, found by looking at the window rather than the log.
 
+**Not waiting to be told about a ready check.** The overlay is driven by the ready-check events, and
+once, on a live queue pop, those never arrived: the client fired thirteen of them and the agent saw
+none, while the gameflow event for the same pop landed correctly on the same socket a moment
+earlier. The phone showed nothing, auto-accept never ran, and the queue dodged. It was not
+reproducible afterwards on the same code, so the cause is still unknown.
+
+Rather than leave the overlay depending on an event that has been observed to go missing, entering
+the ReadyCheck phase now reads the check straight off the client. The phase event demonstrably
+arrives, so that is enough on its own. The read backs off when a check is already known, since the
+events are the normal path and carry the ticking timer that a one-shot read does not.
+
+The agent also logs a queue popping and how it was answered. It did not before, which is why the
+first report of this had no trail to read: nothing distinguished a check that never arrived from one
+that arrived and was answered by something else.
+
 **Naming what connected.** The window used to say "Phone: 2 connected", which is wrong the moment one
 of them is a browser on the same desk as the agent. The remote now says what it is on the socket URL,
 because only it knows: Capacitor answers that directly, where the user agent cannot separate the

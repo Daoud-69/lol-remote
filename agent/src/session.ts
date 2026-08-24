@@ -193,6 +193,19 @@ export class Session extends EventEmitter {
           this.state.readyCheck = null;
         }
 
+        // Entering it, ask outright rather than wait to be told.
+        //
+        // Seen once in the wild: the phase event arrived and said ReadyCheck,
+        // and the ready-check events for the same pop never did — for thirteen
+        // seconds, on a socket that was delivering gameflow events the whole
+        // time. The cause was never pinned down, so this does not try to fix
+        // it; it makes the phase event enough on its own. A missed
+        // subscription now costs nothing, because the phase change is what the
+        // overlay really needs and it demonstrably arrives.
+        if (this.state.phase === "ReadyCheck") {
+          void this.recoverReadyCheck();
+        }
+
         // The moment the client stops being something you can drive from the
         // phone and starts being something you have to be sat at the keyboard
         // for.
@@ -273,6 +286,11 @@ export class Session extends EventEmitter {
 
     const pending = data.state === "InProgress" && data.playerResponse === "None";
     if (pending && !wasPending) {
+      // Logged as well as alerted. Without a line here the activity feed says
+      // nothing about a queue popping, so "it would not let me accept" has no
+      // trail to read afterwards — no way to tell a check that never arrived
+      // from one that arrived and was answered by something else.
+      this.log("Match found — waiting for an answer.");
       this.emit("alert", {
         type: "alert",
         kind: "ready-check",
@@ -280,9 +298,58 @@ export class Session extends EventEmitter {
       } satisfies ServerMessage);
     }
 
+    // The other two endings, so the feed shows how the check was resolved
+    // rather than just going quiet.
+    if (wasPending && !pending && data.playerResponse !== "None") {
+      this.log(`Ready check ${data.playerResponse.toLowerCase()}.`);
+    }
+
     if (pending && this.state.automation.autoAccept) {
       const wait = this.state.automation.autoAcceptDelayMs;
       setTimeout(() => void this.autoAccept(), wait);
+    }
+  }
+
+  /**
+   * Reads the ready check straight off the client, for when the events for it
+   * did not arrive.
+   *
+   * Deliberately does nothing when one is already known: the events are the
+   * normal path and carry the ticking timer, and overwriting a live check with
+   * a one-shot read would only lose that. This is the floor, not the source.
+   */
+  private async recoverReadyCheck(): Promise<void> {
+    if (!this.lcu || this.state.readyCheck) return;
+    try {
+      const data = await this.lcu.get<{
+        state: string;
+        playerResponse: string;
+        timer: number;
+      }>("/lol-matchmaking/v1/ready-check");
+      // Racing the events is fine; whichever lands first wins and the other
+      // sees a check already present.
+      if (!data?.state || this.state.readyCheck) return;
+
+      this.state.readyCheck = {
+        state: data.state,
+        playerResponse: data.playerResponse,
+        timer: data.timer ?? 0,
+      };
+      this.publish();
+
+      if (data.state === "InProgress" && data.playerResponse === "None") {
+        this.log("Match found — waiting for an answer.");
+        this.emit("alert", {
+          type: "alert",
+          kind: "ready-check",
+          message: "Match found — accept now!",
+        } satisfies ServerMessage);
+        if (this.state.automation.autoAccept) {
+          setTimeout(() => void this.autoAccept(), this.state.automation.autoAcceptDelayMs);
+        }
+      }
+    } catch {
+      // 404 is the ordinary answer when the check has already gone.
     }
   }
 
